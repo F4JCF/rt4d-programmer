@@ -435,3 +435,48 @@ def test_stock_keys(stock_radio, tmp_path):
     radio_ops.write_codeplug("X", cp, [], str(tmp_path), log=lambda m: None)
     assert stock_radio.spi[0x1C060 + 31] == 5 and stock_radio.spi[0x1C060 + 46] == 8
     assert radio_ops.read_codeplug("X", log=lambda m: None).keys[0] == 5
+
+
+# ───────────────────────── firmware officiel (paquet Radtel) ─────────────────────────
+
+import zipfile
+from rt4dprog import firmware_pkg as FW
+
+
+def _hexrec(addr, typ, data):
+    b = bytes([len(data), (addr >> 8) & 0xFF, addr & 0xFF, typ]) + data
+    return ":" + (b + bytes([(-sum(b)) & 0xFF])).hex().upper()
+
+
+def fake_upgrade_exe():
+    code = bytes([0x48, 0xAE, 0x00, 0x20, 0xC1, 0x2A, 0x00, 0x08]) + bytes(range(24))
+    text = _hexrec(0, 4, b"\x08\x00") + _hexrec(0x2800, 0, code[:16]) + \
+        _hexrec(0x2810, 0, code[16:]) + _hexrec(0, 5, b"\x08\x00\x29\xE1") + _hexrec(0, 1, b"")
+    return b"MZ" + b"\x00" * 100 + text.encode("utf-16-le") + b"\x00\x00" * 4, code
+
+
+def test_official_package(tmp_path, monkeypatch):
+    exe, code = fake_upgrade_exe()
+    z = tmp_path / "RT-4D Upgrade V3_25_260205.zip"
+    with zipfile.ZipFile(z, "w") as zf:
+        zf.writestr("RT-4D Upgrade V3_25_SLOW_260205/RT-4D Upgrade V3_25_SLOW_260205.exe", exe)
+        zf.writestr("RT-4D Upgrade V3_25_260205/RT-4D Upgrade V3_25_260205.exe", exe)
+    fw = FW.load_firmware(str(z))
+    assert fw.official and "V3.25 (260205)" in fw.label and fw.image[:len(code)] == code
+    assert len(fw.image) == protocol.FIRMWARE_MAX_SIZE
+    with pytest.raises(protocol.RadioError, match="rar"):
+        FW.load_firmware(str(tmp_path / "x.rar"))
+    r = FakeRadio(bootloader=True)
+    monkeypatch.setattr(protocol.BootLink, "open", classmethod(lambda cls, port: cls(r)))
+    protocol.flash_firmware("X", fw.image, log=lambda m: None, full_image=True)
+    assert bytes(r.firmware) == fw.image and len(r.firmware) == 251904
+
+
+REAL_UPG = ("/home/claude/fw_in/RT-4D 20260205 Upgrade/RT-4D 20260205 Upgrade/"
+            "RT-4D Upgrade V3_25_260205.zip")
+
+
+@pytest.mark.skipif(not os.path.exists(REAL_UPG), reason="paquet Radtel absent")
+def test_real_radtel_package():
+    fw = FW.load_firmware(REAL_UPG)
+    assert fw.official and fw.used_bytes == 155740 and "V3.25" in fw.label

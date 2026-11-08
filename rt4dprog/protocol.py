@@ -271,26 +271,28 @@ class BootLink:
         cmd[4] = _sum(cmd[:4], 0x48)
         return bytes(cmd)
 
-    def erase(self) -> bool:
-        """Efface la flash MCU (méthode Dual Tachyon, repli « poignée de main »)."""
+    def _send_wait(self, cmd: bytes, tries: int) -> bool:
         self.ser.reset_input_buffer()
-        self.ser.write(self._cmd5(0x00, 0x00, 0x55))
-        if self._wait_ack(400):            # jusqu'à ~40 s
-            return True
-        # Repli : séquence utilisée par l'outil officiel (3 × 0x10 puis 0x55)
-        for _ in range(3):
-            ok = False
-            for _ in range(10):
-                self.ser.reset_input_buffer()
-                self.ser.write(self._cmd5(0x33, 0x05, 0x10))
-                if self._wait_ack(5):
-                    ok = True
-                    break
-            if not ok:
-                return False
-        self.ser.reset_input_buffer()
-        self.ser.write(self._cmd5(0x33, 0x05, 0x55))
-        return self._wait_ack(400)
+        self.ser.write(cmd)
+        return self._wait_ack(tries)
+
+    def erase(self, log: Callable[[str], None] = print) -> bool:
+        """Efface la flash MCU.
+
+        1) Séquence de l'outil officiel Radtel : 3 × « 39 33 05 10 » puis « 39 33 05 55 ».
+        2) Repli : commande « 39 00 00 55 » des outils de Dual Tachyon.
+        """
+        ok = True
+        for step in range(3):
+            if not any(self._send_wait(self._cmd5(0x33, 0x05, 0x10), 5) for _ in range(10)):
+                ok = False
+                break
+        if ok:
+            log("Liaison établie (procédure officielle). Effacement…")
+            if self._send_wait(self._cmd5(0x33, 0x05, 0x55), 400):      # jusqu'à ~40 s
+                return True
+        log("Procédure officielle sans réponse, essai de la méthode alternative…")
+        return self._send_wait(self._cmd5(0x00, 0x00, 0x55), 400)
 
     def write_chunk(self, offset: int, firmware: bytes) -> bool:
         cmd = bytearray(BLOCK + 4)
@@ -325,17 +327,21 @@ def check_firmware_file(data: bytes) -> Optional[str]:
 
 
 def flash_firmware(port: str, firmware: bytes, progress: Progress = None,
-                   cancel: CancelCheck = None, log: Callable[[str], None] = print):
+                   cancel: CancelCheck = None, log: Callable[[str], None] = print,
+                   full_image: bool = False):
+    """Flashe le firmware MCU. full_image=True : image complète de 246 Ko (firmware officiel)."""
     err = check_firmware_file(firmware)
     if err:
         raise RadioError(err)
+    if full_image:
+        firmware = bytes(firmware) + b"\x00" * (FIRMWARE_MAX_SIZE - len(firmware))
     with BootLink.open(port) as link:
         log("Recherche du bootloader… (allumez la radio en maintenant le PTT)")
         if not link.probe(cancel=cancel):
             raise RadioError("Le bootloader ne répond pas. Éteignez la radio, maintenez le PTT "
                              "enfoncé et rallumez-la, câble branché, puis réessayez.")
         log("Bootloader détecté. Effacement de la mémoire du firmware… (jusqu'à 40 s)")
-        if not link.erase():
+        if not link.erase(log):
             raise RadioError("L'effacement a échoué. Rien n'a été écrit ; recommencez la procédure.")
         n = (len(firmware) + BLOCK - 1) // BLOCK
         log(f"Écriture de {len(firmware)} octets ({n} blocs)…")

@@ -2,7 +2,7 @@
 
 Ce logiciel programme le talkie-walkie **Radtel RT-4D** sous **Windows et Linux**. Il reconnaît automatiquement deux firmwares :
 
-- le **firmware officiel Radtel**, à partir de la V3.18 (testé avec la V3.22). Les données sont lues et écrites exactement comme le fait le logiciel officiel Radtel (CPS V2.07) ;
+- le **firmware officiel Radtel**, à partir de la V3.18 (testé avec la V3.22 ; la V3.25 utilise la même organisation de la mémoire). Les données sont lues et écrites exactement comme le fait le logiciel officiel Radtel (CPS V2.07) ;
 - le firmware communautaire **REFW** de Dual Tachyon, à partir de la beta 41.
 
 ## Fonctions
@@ -17,7 +17,7 @@ Ce logiciel programme le talkie-walkie **Radtel RT-4D** sous **Windows et Linux*
 - **Réglages des touches** (firmware officiel) : action des touches latérales, de la touche alarme et des appuis longs 0 à 9, parmi les 41 fonctions proposées par Radtel.
 - **Carnet d'adresses DMR** : téléchargement de la base RadioID.net (ou import d'un CSV) et choix des pays, puis envoi à la radio, qui affiche l'indicatif et le nom des correspondants.
 - **Sauvegarde complète de la flash** (4 Mo) et **restauration**. Par défaut, la calibration est préservée.
-- **Flash du firmware** pour mettre à jour la radio ou revenir à une version antérieure, avec un fichier `.bin`.
+- **Flash du firmware** pour mettre à jour la radio ou revenir à une version antérieure. Il accepte directement le paquet officiel Radtel (le zip « RT-4D Upgrade Vx_xx_xxxxxx.zip » ou le .exe qu'il contient) : le firmware y est extrait sans lancer l'outil Radtel, puis flashé avec la même procédure que celle-ci. Un fichier `.bin` (REFW…) est aussi accepté.
 - **Import et export CSV** des canaux et des contacts. Le séparateur « ; » s'ouvre directement dans Excel ou LibreOffice.
 - Fichiers : `.rt4d` pour le firmware officiel, `.4rdmf` (compatible RT4D Editor) pour REFW. Une sauvegarde complète `.bin` peut aussi être ouverte, pour consulter son contenu.
 
@@ -53,7 +53,7 @@ Ensuite, le logiciel vérifie au démarrage s'il existe une nouvelle version. Si
 Limites :
 
 - seul le firmware principal (MCU) est flashé, pas celui de la puce DMR ;
-- les mises à jour officielles Radtel sont des `.exe` sans `.bin` exploitable ;
+- la puce DMR et la table Unicode (SMS) se mettent à jour avec les outils séparés du paquet Radtel ;
 - après un changement de version REFW, relisez la radio avant d'écrire, car la disposition de la mémoire peut changer d'une beta à l'autre.
 
 ## Sécurité

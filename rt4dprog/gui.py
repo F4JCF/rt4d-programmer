@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QSizePolicy, QToolButton
 from . import APP_NAME, __version__, csvio
 from . import layout as L
 from . import addressbook as AB
+from . import firmware_pkg as FW
 from . import protocol, radio_ops, updater
 from .codeplug import Codeplug
 from .gui_tabs import ChannelsTab, ContactsTab, GroupsTab, KeysTab, SettingsTab, ZonesTab
@@ -209,20 +210,24 @@ class FirmwareDialog(QDialog):
         self.setWindowTitle("Flasher un firmware (mise à jour / retour arrière)")
         self.setMinimumWidth(600)
         self.data = None
+        self.fw = None
         self.last_dir = last_dir
         v = QVBoxLayout(self)
         warn = QLabel(
             "<b>Attention : cette opération remplace le firmware de la radio.</b><br>"
-            "Faites d'abord une sauvegarde complète (menu Radio). Utilisez uniquement un "
-            "fichier <code>.bin</code> prévu pour le RT-4D (par exemple une version REFW "
-            "de Dual Tachyon, plus récente ou plus ancienne).<br><br>"
+            "Faites d'abord une sauvegarde complète (menu Radio).<br><br>"
+            "<b>Firmware officiel Radtel</b> : téléchargez la mise à jour RT-4D sur le site Radtel "
+            "(bouton ci-dessous), décompressez le .rar puis choisissez le fichier "
+            "« RT-4D Upgrade Vx_xx_xxxxxx.zip ». Le firmware est extrait sans lancer l'outil Radtel.<br>"
+            "Vous pouvez aussi choisir un fichier <code>.bin</code> (par exemple REFW).<br><br>"
             "<b>Procédure :</b><br>"
             "1. Éteignez la radio, laissez le câble USB branché.<br>"
             "2. <b>Maintenez le PTT enfoncé</b> et rallumez la radio : l'écran reste éteint "
             "(mode bootloader). Vous pouvez relâcher le PTT.<br>"
             "3. Cliquez sur « Flasher ». Ne débranchez rien avant la fin.<br>"
             "4. À la fin, éteignez puis rallumez la radio normalement.<br><br>"
-            "Seul le firmware principal (MCU) est flashé, pas celui de la puce DMR.")
+            "Seul le firmware principal (MCU) est flashé. La puce DMR et la table Unicode "
+            "(SMS) se mettent à jour avec les outils séparés fournis dans le même paquet Radtel.")
         warn.setWordWrap(True)
         warn.setTextFormat(Qt.RichText)
         v.addWidget(warn)
@@ -238,9 +243,13 @@ class FirmwareDialog(QDialog):
         self.file = QLineEdit(readOnly=True)
         b = QPushButton("Choisir…")
         b.clicked.connect(self.pick)
+        b2 = QPushButton("Site Radtel…")
+        b2.setToolTip(FW.RADTEL_DOWNLOAD_PAGE)
+        b2.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(FW.RADTEL_DOWNLOAD_PAGE)))
         row.addWidget(self.file, 1)
         row.addWidget(b)
-        f.addRow("Fichier firmware", row)
+        row.addWidget(b2)
+        f.addRow("Firmware", row)
         v.addLayout(f)
         self.status = QLabel()
         self.status.setWordWrap(True)
@@ -257,22 +266,23 @@ class FirmwareDialog(QDialog):
         self.update_ok()
 
     def pick(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Firmware RT-4D", self.last_dir,
-                                              "Firmware (*.bin);;Tous les fichiers (*)")
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Firmware RT-4D", self.last_dir,
+            "Firmware RT-4D (*.zip *.exe *.bin *.rar);;Tous les fichiers (*)")
         if not path:
             return
         self.last_dir = os.path.dirname(path)
         self.file.setText(path)
-        with open(path, "rb") as fh:
-            data = fh.read()
-        err = protocol.check_firmware_file(data)
-        if err:
+        try:
+            self.fw = FW.load_firmware(path)
+            self.data = self.fw.image
+            self.status.setText(f"<span style='color:#27ae60'><b>{self.fw.label}</b> — "
+                                f"{self.fw.used_bytes // 1024} Ko de code, prêt à flasher."
+                                f"</span>")
+        except Exception as e:
+            self.fw = None
             self.data = None
-            self.status.setText(f"<span style='color:#c0392b'>{err}</span>")
-        else:
-            self.data = data
-            self.status.setText(f"<span style='color:#27ae60'>Fichier valide : {len(data)} octets "
-                                f"({(len(data) + 1023) // 1024} blocs).</span>")
+            self.status.setText(f"<span style='color:#c0392b'>{e}</span>")
         self.update_ok()
 
     def update_ok(self):
@@ -839,7 +849,7 @@ class MainWindow(QMainWindow):
         self.settings.setValue("fw_dir", dlg.last_dir)
         port = dlg.port.currentData()
         ok, _ = TaskDialog.run(self, "Flash du firmware", protocol.flash_firmware, port, dlg.data,
-                               cancellable=False)
+                               cancellable=False, full_image=bool(dlg.fw and dlg.fw.official))
         if ok:
             QMessageBox.information(self, "Firmware", "Firmware flashé avec succès.\n\nÉteignez puis "
                                     "rallumez la radio normalement.")
