@@ -525,6 +525,40 @@ def test_stock_startup(stock_radio, tmp_path):
     assert stock_radio.spi[0x2000 + 23] == 5 and stock_radio.spi[0x1C060 + 20] == 2
 
 
+def test_stock_freq_limits(stock_radio, tmp_path):
+    cp = radio_ops.read_codeplug("X", log=lambda m: None)
+    assert cp.LIMITS["freq_limits"]
+    assert len(cp.freq_limits) == S.LIMIT_N
+    assert cp.build() == bytes(cp.image)                  # relecture sans modification : identique
+    cp.freq_limits = [list(x) for x in S.HAM_PRESET]
+    assert cp.validate() == []
+    radio_ops.write_codeplug("X", cp, [], str(tmp_path), log=lambda m: None)
+    raw = bytes(stock_radio.spi[0x2000 + 142:0x2000 + 162])
+    assert raw == bytes.fromhex("011200" "9000" "019200" "ae01" "01b801" "e803" "001200" "e803")
+    cp2 = radio_ops.read_codeplug("X", log=lambda m: None)
+    assert cp2.freq_limits == [list(x) for x in S.HAM_PRESET]
+    # les canaux du codeplug d'essai (145,500 et 438,900 MHz) restent autorisés
+    assert all(S.tx_allowed(cp2.freq_limits, ch.tx) for ch in cp2.channels.values())
+
+
+def test_tx_allowed_rules():
+    ham = S.HAM_PRESET
+    none = [S.LIMIT_UNUSED] * 4
+    mhz = lambda f: round(f * 100_000)
+    assert S.tx_allowed(none, mhz(145.5)) and S.tx_allowed(none, mhz(27.0))
+    assert not S.tx_allowed(none, mhz(118.0))             # bande aviation, toujours refusée
+    assert S.tx_allowed(ham, mhz(144.8)) and S.tx_allowed(ham, mhz(439.975))
+    assert not S.tx_allowed(ham, mhz(144.0)) and not S.tx_allowed(ham, mhz(146.0))   # bornes incluses
+    assert not S.tx_allowed(ham, mhz(446.00625)) and not S.tx_allowed(ham, mhz(70.0))
+
+
+def test_freq_limits_validation(stock_radio):
+    cp = radio_ops.read_codeplug("X", log=lambda m: None)
+    cp.freq_limits = [[1, 500, 400], [2, 10, 100], [0, 0, 0], [1, 18, 1000]]
+    pb = cp.validate()
+    assert len(pb) == 2 and "n°1" in pb[0] and "n°2" in pb[1]
+
+
 # ───────────── ancien firmware officiel (V3.14 – V3.17), lecture seule ─────────────
 from rt4dprog import legacy as O
 

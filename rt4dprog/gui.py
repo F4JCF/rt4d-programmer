@@ -23,14 +23,14 @@ from . import addressbook as AB
 from . import firmware_pkg as FW
 from . import legacy, linux_desktop, protocol, radio_ops, updater
 from .codeplug import Codeplug
-from .gui_tabs import (ChannelsTab, ContactsTab, GroupsTab, KeysTab, SettingsTab, StartupTab,
+from .gui_tabs import (ChannelsTab, ContactsTab, FreqLimitsTab, GroupsTab, KeysTab, SettingsTab, StartupTab,
                        ZonesTab)
 from .protocol import Cancelled, RadioError
 
 HELP = """
 <h3>RT4D Programmer — mode d'emploi rapide</h3>
 <p><b>Ce logiciel programme le Radtel RT-4D</b> avec le <b>firmware officiel Radtel
-V3.18 ou plus récent</b> (testé avec la V3.22) ou avec le firmware communautaire
+V3.18 ou plus récent</b> (testé avec les V3.22 et V3.25) ou avec le firmware communautaire
 <b>REFW</b> (beta 41 ou plus). Le format est détecté automatiquement.</p>
 <h4>Programmer la radio</h4>
 <ol>
@@ -44,17 +44,22 @@ sauvegardé automatiquement dans le dossier indiqué.</li>
 <p><b>Radio → Carnet d'adresses DMR</b> : téléchargez la base RadioID.net (ou ouvrez un CSV),
 cochez les pays voulus puis envoyez. La radio affichera l'indicatif et le nom des stations
 qui vous appellent.</p>
+<h4>Limites de fréquences (firmware officiel)</h4>
+<p>Onglet <b>Limites de fréquences</b> : jusqu'à 4 plages où l'émission est interdite.
+Le bouton « Émission limitée aux bandes radioamateur » n'autorise l'émission que de 144 à 146
+et de 430 à 440 MHz. Écrivez ensuite dans la radio. Hors de ces bandes, le poste affiche
+« Prohibit TX » au lieu d'émettre. « Aucune limite » rétablit le réglage d'usine.</p>
 <h4>Changer de firmware (mise à jour ou retour arrière)</h4>
 <ol>
 <li>Faites d'abord une <b>sauvegarde complète</b> (Radio → Sauvegarde complète, environ 6 min).</li>
-<li>Menu <b>Firmware → Flasher un firmware</b>, choisissez le fichier <code>.bin</code>.</li>
+<li>Menu <b>Firmware → Flasher un firmware</b>, choisissez le paquet officiel Radtel
+(« RT-4D Upgrade Vx_xx_xxxxxx.zip ») ou un fichier <code>.bin</code>.</li>
 <li>Éteignez la radio, câble branché, puis <b>rallumez-la en maintenant le PTT</b>
 (mode bootloader : l'écran reste éteint).</li>
 <li>Lancez le flash et ne touchez à rien jusqu'à la fin.</li>
 </ol>
 <p>Ce logiciel flashe le firmware principal (MCU). Il ne flashe pas le firmware
-de la puce DMR. Les mises à jour officielles Radtel sont livrées en <code>.exe</code>
-et ne contiennent pas de <code>.bin</code> utilisable ici.</p>
+de la puce DMR. Le firmware est extrait du paquet officiel Radtel sans lancer l'outil Radtel.</p>
 <h4>Linux</h4>
 <p>Si le port est refusé : <code>sudo usermod -aG dialout $USER</code>, puis fermez et rouvrez la session.</p>
 """
@@ -607,12 +612,14 @@ class MainWindow(QMainWindow):
         self.t_st = SettingsTab()
         self.t_keys = KeysTab()
         self.t_start = StartupTab()
+        self.t_lim = FreqLimitsTab()
         self.t_ab = AddressBookTab(self)
         self.logbox = QPlainTextEdit(readOnly=True)
         self.logbox.setFont(QFont("Monospace", 9))
         for t, name in ((self.t_ch, "Canaux"), (self.t_ct, "Contacts"), (self.t_gl, "Groupes RX"),
                         (self.t_zn, "Zones"), (self.t_st, "ID DMR"),
-                        (self.t_keys, "Réglages touches"), (self.t_start, "Menu démarrage")):
+                        (self.t_keys, "Réglages touches"), (self.t_start, "Menu démarrage"),
+                        (self.t_lim, "Limites de fréquences")):
             self.tabs.addTab(t, name)
             t.changed.connect(self.mark_dirty)
         self.tabs.addTab(self.t_ab, "Carnet adresse DMR")
@@ -776,7 +783,8 @@ class MainWindow(QMainWindow):
         self.cp = cp
         self.path = path
         self.dirty = False
-        for t in (self.t_ch, self.t_ct, self.t_gl, self.t_zn, self.t_st, self.t_keys, self.t_start):
+        for t in (self.t_ch, self.t_ct, self.t_gl, self.t_zn, self.t_st, self.t_keys, self.t_start,
+                  self.t_lim):
             t.set_codeplug(cp)
         self.update_banner()
         self.update_title()

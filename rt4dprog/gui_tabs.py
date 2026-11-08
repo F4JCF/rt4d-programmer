@@ -1016,3 +1016,132 @@ class StartupTab(BaseTab):
         if self.cp and self.e_msg.text() != self.cp.settings.startup_message:
             self.cp.settings.startup_message = self.e_msg.text()
             self.changed.emit()
+
+
+# ───────────────────────────── Limites de fréquences ─────────────────────────────
+
+class FreqLimitsTab(BaseTab):
+    """Les 4 plages de limites de fréquences du firmware officiel Radtel (V3.18+)."""
+
+    def __init__(self):
+        super().__init__()
+        from . import stock as S
+        self.S = S
+        v = QVBoxLayout(self)
+        self.info = QLabel()
+        self.info.setWordWrap(True)
+        v.addWidget(self.info)
+        self.box = QGroupBox("Plages (bornes incluses, en MHz entiers)")
+        g = QFormLayout(self.box)
+        self.rows = []
+        for i in range(S.LIMIT_N):
+            t = QComboBox()
+            t.addItems(S.LIMIT_TYPES)
+            a = QSpinBox(minimum=0, maximum=65535, suffix=" MHz")
+            b = QSpinBox(minimum=0, maximum=65535, suffix=" MHz")
+            for w in (a, b):
+                w.valueChanged.connect(self.save)
+            t.currentIndexChanged.connect(self.save)
+            h = QHBoxLayout()
+            h.addWidget(t, 2)
+            h.addWidget(QLabel("de"))
+            h.addWidget(a, 1)
+            h.addWidget(QLabel("à"))
+            h.addWidget(b, 1)
+            g.addRow(f"Plage {i + 1}", h)
+            self.rows.append((t, a, b))
+        v.addWidget(self.box)
+        bar = QHBoxLayout()
+        self.b_ham = QPushButton("Émission limitée aux bandes radioamateur (144-146 et 430-440 MHz)")
+        self.b_ham.clicked.connect(lambda: self.apply([list(x) for x in S.HAM_PRESET]))
+        self.b_none = QPushButton("Aucune limite (réglage d'usine)")
+        self.b_none.clicked.connect(lambda: self.apply([list(S.LIMIT_UNUSED)] * S.LIMIT_N))
+        bar.addWidget(self.b_ham)
+        bar.addWidget(self.b_none)
+        bar.addStretch()
+        v.addLayout(bar)
+        self.check = QLabel()
+        self.check.setWordWrap(True)
+        self.check.setTextFormat(Qt.RichText)
+        v.addWidget(self.check)
+        help_ = QLabel(
+            "<b>Comment ça marche</b> (analyse du firmware V3.25) :<br>"
+            "• <b>Émission interdite</b> : le poste refuse d'émettre dans la plage et affiche "
+            "« Prohibit TX ». Les bornes sont incluses : « 18 à 144 » interdit aussi 144,000 MHz.<br>"
+            "• <b>Réception seulement dans cette plage</b> : si au moins une plage de ce type existe, "
+            "le poste ne reçoit que dans ces plages.<br>"
+            "• Quels que soient ces réglages, le poste n'émet jamais de 108 à 136 MHz (bande aviation) "
+            "et ne reçoit que de 18 à 620 et de 840 à 1000 MHz.<br>"
+            "• Écrivez dans la radio pour appliquer les limites. Pour les retirer, choisissez "
+            "« Aucune limite » puis écrivez à nouveau.")
+        help_.setWordWrap(True)
+        help_.setTextFormat(Qt.RichText)
+        v.addWidget(help_)
+        v.addStretch()
+
+    def _ok(self) -> bool:
+        return bool(self.cp) and self.cp.LIMITS.get("freq_limits", False)
+
+    def refresh(self):
+        ok = self._ok()
+        for w in (self.box, self.b_ham, self.b_none):
+            w.setEnabled(ok and not self.ro)
+        if not ok:
+            self.info.setText("Les limites de fréquences ne sont disponibles qu'avec le firmware "
+                              "officiel Radtel (V3.18 ou plus récent).")
+            self.check.clear()
+            return
+        self.info.setText("Le firmware officiel peut interdire l'émission sur certaines plages. "
+                          "Par défaut, les 4 plages sont inactives : le poste peut alors émettre de "
+                          "18 à 1000 MHz (sauf 108-136 MHz).")
+        ws = [w for row in self.rows for w in row]
+        with _Block(ws):
+            for (t, a, b), (lt, la, lb) in zip(self.rows, self.cp.freq_limits):
+                while t.count() > len(self.S.LIMIT_TYPES):
+                    t.removeItem(t.count() - 1)
+                if lt >= len(self.S.LIMIT_TYPES):
+                    t.addItem(f"Valeur inconnue ({lt})")
+                    t.setCurrentIndex(t.count() - 1)
+                else:
+                    t.setCurrentIndex(lt)
+                a.setValue(la)
+                b.setValue(lb)
+        self.update_check()
+
+    def apply(self, limits):
+        self.cp.freq_limits = limits
+        self.refresh()
+        self.changed.emit()
+
+    def save(self, *_):
+        if not self._ok():
+            return
+        new = []
+        for (t, a, b), old in zip(self.rows, self.cp.freq_limits):
+            ti = t.currentIndex()
+            new.append([ti if ti < len(self.S.LIMIT_TYPES) else old[0], a.value(), b.value()])
+        if new != self.cp.freq_limits:
+            self.cp.freq_limits = new
+            self.changed.emit()
+        self.update_check()
+
+    def update_check(self):
+        S = self.S
+        lim = self.cp.freq_limits
+        pb = [f"Plage {i + 1} : début après la fin, ou hors de {S.LIMIT_MHZ[0]}-{S.LIMIT_MHZ[1]} MHz."
+              for i, (t, a, b) in enumerate(lim)
+              if t in (1, 2) and not (S.LIMIT_MHZ[0] <= a <= b <= S.LIMIT_MHZ[1])]
+        blocked = [f"{slot + 1} « {ch.name} » ({fmt_mhz(ch.tx)} MHz)"
+                   for slot, ch in sorted(self.cp.channels.items())
+                   if ch.tx and not S.tx_allowed(lim, ch.tx)]
+        html = []
+        if pb:
+            html.append("<span style='color:#c0392b'><b>À corriger :</b> " + " ".join(pb) + "</span>")
+        if blocked:
+            more = f" … et {len(blocked) - 15} autres" if len(blocked) > 15 else ""
+            html.append(f"<b>{len(blocked)} canal(aux) ne pourront pas émettre</b> avec ces "
+                        f"limites : " + ", ".join(blocked[:15]) + more + ".")
+        elif not pb:
+            html.append("<span style='color:#27ae60'>Tous les canaux du codeplug pourront émettre "
+                        "avec ces limites.</span>")
+        self.check.setText("<br>".join(html))

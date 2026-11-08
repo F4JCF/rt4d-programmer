@@ -113,6 +113,27 @@ STARTUP_FIELDS = [
     ("carrier", "cfg", 852, 1, _ONOFF, "Voyant de porteuse", "Sons et voyants"),
 ]
 
+# Limites de fréquences (réglages 0x2000, octets 142-161 ; lues par le firmware V3.25 en RAM 0x20002A49).
+# 4 plages de 5 octets : type, début (u16, MHz), fin (u16, MHz), bornes incluses.
+# Type 1 : émission interdite dans la plage. Type 2 : réception autorisée seulement dans les plages
+# de type 2. En plus, le firmware refuse toujours l'émission de 108 à 136 MHz (bande aviation).
+LIMIT_OFF = 142
+LIMIT_N = 4
+LIMIT_TYPES = ["Inactive", "Émission interdite", "Réception seulement dans cette plage"]
+LIMIT_MHZ = (18, 1000)                 # plage de réception du poste (18-620 et 840-1000 MHz)
+LIMIT_UNUSED = (0, 18, 1000)           # valeur d'usine d'une plage inactive
+# Émission limitée aux bandes radioamateur 144-146 et 430-440 MHz
+HAM_PRESET = [(1, 18, 144), (1, 146, 430), (1, 440, 1000), LIMIT_UNUSED]
+
+
+def tx_allowed(limits, f: int) -> bool:
+    """Reproduit le contrôle d'émission du firmware V3.25 (fonction 0x08005F8C).
+    f : fréquence d'émission en unités de 10 Hz (comme dans les canaux)."""
+    if 10_800_000 <= f <= 13_600_000:
+        return False
+    return not any(t == 1 and a * 100_000 <= f <= b * 100_000 for t, a, b in limits)
+
+
 CONNECT = bytes([0x34, 0x52, 0x05, 0x10, 0x9B])
 END = bytes([0x34, 0x52, 0x05, 0xEE, 0x79])
 ALL_CALL = bytes([0x02, 0xAA, 0xAA, 0xAA, 0xAA])
@@ -136,7 +157,7 @@ class StockCodeplug:
     is_refw = False
     LIMITS = dict(channels=CH_MAX, contacts=CT_MAX, groups=GL_MAX, group_ids=GL_IDS,
                   zones=ZN_MAX, zone_channels=ZN_CH_MAX, zone_scan=False, contact0_fixed=True,
-                  keys=True, startup=True)
+                  keys=True, startup=True, freq_limits=True)
 
     def __init__(self, image: bytes):
         if len(image) >= IMAGE_SIZE:
@@ -201,6 +222,8 @@ class StockCodeplug:
             base = A_CFG if area == "cfg" else A_CFG2
             self.startup[key] = int.from_bytes(img[base + off:base + off + size], "little")
         cfg = img[A_CFG:A_CFG + 0x400]
+        self.freq_limits = [list(struct.unpack_from("<BHH", cfg, LIMIT_OFF + 5 * i))
+                            for i in range(LIMIT_N)]
         self.settings = Settings(radio_id=bcd_decode(cfg[384:388]),
                                  radio_name=get_name(cfg, 76, 16),
                                  startup_message=get_name(cfg, 44, 32))
@@ -282,6 +305,8 @@ class StockCodeplug:
         cfg[384:388] = bcd_encode(s.radio_id)
         put_name(cfg, 76, s.radio_name, 16)
         put_name(cfg, 44, s.startup_message, 32)
+        for i, (t, a, b) in enumerate(self.freq_limits):
+            struct.pack_into("<BHH", cfg, LIMIT_OFF + 5 * i, t & 0xFF, a & 0xFFFF, b & 0xFFFF)
         img[A_CFG:A_CFG + 0x400] = cfg
         return bytes(img)
 
@@ -353,4 +378,8 @@ class StockCodeplug:
         for g in self.groups.values():
             if len(g.contacts) > GL_IDS:
                 pb.append(f"Groupe « {g.name} » : plus de {GL_IDS} contacts.")
+        for i, (t, a, b) in enumerate(self.freq_limits):
+            if t in (1, 2) and not (LIMIT_MHZ[0] <= a <= b <= LIMIT_MHZ[1]):
+                pb.append(f"Limite de fréquences n°{i + 1} : plage {a}-{b} MHz invalide "
+                          f"(début ≤ fin, entre {LIMIT_MHZ[0]} et {LIMIT_MHZ[1]} MHz).")
         return pb
