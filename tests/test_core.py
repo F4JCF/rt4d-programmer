@@ -506,3 +506,17 @@ def test_update_download_retries(monkeypatch, tmp_path):
     updater.download_and_install(rel, log=lambda m: None)
     assert calls == ["https://a", "https://a", "https://api"]   # direct, proxy, direct
     assert target.read_bytes() == b"\x7fELF nouvelle version"
+
+
+def test_stock_startup(stock_radio, tmp_path):
+    cp = radio_ops.read_codeplug("X", log=lambda m: None)
+    cp.startup["tone"] = 0
+    cp.startup["line"] = 5
+    cp.startup["col"] = 300 % 128
+    cp.startup["work_a"] = 2
+    cp.settings.startup_message = "ADRASEC 06"
+    radio_ops.write_codeplug("X", cp, [], str(tmp_path), log=lambda m: None)
+    cp2 = radio_ops.read_codeplug("X", log=lambda m: None)
+    assert cp2.startup["tone"] == 0 and cp2.startup["line"] == 5 and cp2.startup["work_a"] == 2
+    assert cp2.settings.startup_message == "ADRASEC 06"
+    assert stock_radio.spi[0x2000 + 23] == 5 and stock_radio.spi[0x1C060 + 20] == 2

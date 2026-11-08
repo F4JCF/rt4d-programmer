@@ -892,3 +892,106 @@ class KeysTab(BaseTab):
     def reset_all(self):
         for cb in self.combos:
             cb.setCurrentIndex(0)
+
+
+# ───────────────────────────── Menu démarrage ─────────────────────────────
+
+class StartupTab(BaseTab):
+    """Allumage et affichage (firmware officiel Radtel)."""
+
+    def __init__(self):
+        super().__init__()
+        from . import stock as S
+        self.S = S
+        outer = QVBoxLayout(self)
+        self.info = QLabel()
+        self.info.setWordWrap(True)
+        outer.addWidget(self.info)
+        cols = QHBoxLayout()
+        outer.addLayout(cols, 1)
+        left, right = QVBoxLayout(), QVBoxLayout()
+        cols.addLayout(left, 1)
+        cols.addLayout(right, 1)
+        self.widgets = {}
+        self.boxes = []
+        forms = {}
+        # message d'accueil (texte, 32 caractères)
+        for _, _, _, _, _, _, group in S.STARTUP_FIELDS:
+            if group not in forms:
+                box = QGroupBox(group)
+                forms[group] = QFormLayout(box)
+                (left if group in ("Allumage", "Au démarrage") else right).addWidget(box)
+                self.boxes.append(box)
+        self.e_msg = QLineEdit(maxLength=32)
+        self.e_msg.editingFinished.connect(self.save_msg)
+        forms["Allumage"].addRow("Message d'accueil", self.e_msg)
+        for key, _, _, _, choices, label, group in S.STARTUP_FIELDS:
+            if isinstance(choices, tuple):
+                w = QSpinBox(minimum=choices[0], maximum=choices[1])
+                w.valueChanged.connect(self.save)
+            else:
+                w = QComboBox()
+                w.setMaxVisibleItems(20)
+                if choices != "zones":
+                    w.addItems(choices)
+                w.currentIndexChanged.connect(self.save)
+            self.widgets[key] = w
+            forms[group].addRow(label, w)
+        left.addStretch()
+        right.addStretch()
+
+    def refresh(self):
+        if not self.cp:
+            return
+        ok = self.cp.LIMITS.get("startup", False)
+        for b in self.boxes:
+            b.setEnabled(ok)
+        if not ok:
+            self.info.setText("Ces réglages ne sont disponibles qu'avec le firmware officiel Radtel "
+                              "(V3.18 ou plus récent).")
+            return
+        self.info.setText("Réglages appliqués à l'allumage du poste et à l'affichage. "
+                          "Écrivez dans la radio pour les envoyer.")
+        widgets = list(self.widgets.values()) + [self.e_msg]
+        with _Block(widgets):
+            self.e_msg.setText(self.cp.settings.startup_message)
+            for key, _, _, _, choices, _, _ in self.S.STARTUP_FIELDS:
+                w = self.widgets[key]
+                val = self.cp.startup[key]
+                if choices == "zones":
+                    w.clear()
+                    for i in range(self.S.ZN_MAX):
+                        z = self.cp.zones.get(i)
+                        w.addItem(f"{i + 1} — {z.name}" if z else f"{i + 1} — (zone vide)")
+                if isinstance(w, QSpinBox):
+                    w.setValue(max(w.minimum(), min(val, w.maximum())))
+                else:
+                    if val >= w.count():
+                        w.addItem(f"Valeur inconnue ({val})")
+                        w.setCurrentIndex(w.count() - 1)
+                    else:
+                        w.setCurrentIndex(val)
+
+    def save(self, *_):
+        if not self.cp or not self.cp.LIMITS.get("startup", False):
+            return
+        changed = False
+        for key, _, _, _, choices, _, _ in self.S.STARTUP_FIELDS:
+            w = self.widgets[key]
+            if isinstance(w, QSpinBox):
+                v = w.value()
+            else:
+                v = w.currentIndex()
+                n = self.S.ZN_MAX if choices == "zones" else len(choices)
+                if v >= n:
+                    continue                  # valeur inconnue conservée telle quelle
+            if self.cp.startup[key] != v:
+                self.cp.startup[key] = v
+                changed = True
+        if changed:
+            self.changed.emit()
+
+    def save_msg(self):
+        if self.cp and self.e_msg.text() != self.cp.settings.startup_message:
+            self.cp.settings.startup_message = self.e_msg.text()
+            self.changed.emit()

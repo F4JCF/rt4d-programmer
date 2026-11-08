@@ -284,7 +284,7 @@ class Codeplug:
     kind = "refw"
     LIMITS = dict(channels=L.CH_MAX, contacts=L.CT_MAX, groups=L.GL_MAX, group_ids=L.GL_IDS,
                   zones=L.ZN_MAX, zone_channels=L.ZN_CH_MAX, zone_scan=True, contact0_fixed=False,
-                  keys=False)
+                  keys=False, startup=False)
 
     def __init__(self, image: bytes | None = None):
         if image is None:

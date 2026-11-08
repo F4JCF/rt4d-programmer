@@ -87,6 +87,32 @@ KEY_FUNCTIONS = [
     "Choix DTMF",
 ]
 
+# Réglages « Menu démarrage » : (clé, zone, décalage, taille, choix ou (min, max), libellé, groupe)
+_TIMER = ["Arrêt"] + [f"{(i * 5) if i <= 3 else (i - 2) * 15} s" for i in range(1, 43)]
+_ONOFF = ["Non", "Oui"]
+STARTUP_FIELDS = [
+    ("logo", "cfg", 16, 1, _ONOFF, "Logo au démarrage", "Allumage"),
+    ("tone", "cfg", 19, 1, _ONOFF, "Bip au démarrage", "Allumage"),
+    ("text", "cfg", 20, 1, _ONOFF, "Afficher le message d'accueil", "Allumage"),
+    ("line", "cfg", 23, 2, (0, 7), "Ligne du message (0 = en haut)", "Allumage"),
+    ("col", "cfg", 25, 2, (0, 127), "Colonne du message (en pixels)", "Allumage"),
+    ("work_a", "cfg2", 20, 1, ["Fréquence (VFO)", "Canal", "Zone"], "Mode de travail voie A", "Au démarrage"),
+    ("work_b", "cfg2", 21, 1, ["Fréquence (VFO)", "Canal", "Zone"], "Mode de travail voie B", "Au démarrage"),
+    ("zone_a", "cfg2", 24, 1, "zones", "Zone de la voie A", "Au démarrage"),
+    ("zone_b", "cfg2", 25, 1, "zones", "Zone de la voie B", "Au démarrage"),
+    ("disp_a", "cfg2", 22, 1, ["Numéro de canal", "Fréquence", "Nom"], "Affichage voie A", "Affichage"),
+    ("disp_b", "cfg2", 23, 1, ["Numéro de canal", "Fréquence", "Nom"], "Affichage voie B", "Affichage"),
+    ("digits", "cfg", 234, 1, ["6 chiffres", "8 chiffres"], "Chiffres de la fréquence", "Affichage"),
+    ("light", "cfg", 97, 1, ["0", "1", "2", "3", "4"], "Luminosité de l'écran", "Affichage"),
+    ("light_t", "cfg", 98, 1, _TIMER, "Extinction du rétroéclairage", "Affichage"),
+    ("contrast", "cfg", 233, 1, (5, 25), "Contraste", "Affichage"),
+    ("menu_t", "cfg", 101, 1, _TIMER, "Sortie automatique des menus", "Affichage"),
+    ("grp_disp", "cfg", 404, 1, ["Ville de l'appelant", "ID de l'appelant"], "Appel de groupe : afficher", "Affichage"),
+    ("voice", "cfg", 92, 1, _ONOFF, "Annonces vocales", "Sons et voyants"),
+    ("beep", "cfg", 93, 1, _ONOFF, "Bip des touches", "Sons et voyants"),
+    ("carrier", "cfg", 852, 1, _ONOFF, "Voyant de porteuse", "Sons et voyants"),
+]
+
 CONNECT = bytes([0x34, 0x52, 0x05, 0x10, 0x9B])
 END = bytes([0x34, 0x52, 0x05, 0xEE, 0x79])
 ALL_CALL = bytes([0x02, 0xAA, 0xAA, 0xAA, 0xAA])
@@ -110,7 +136,7 @@ class StockCodeplug:
     is_refw = False
     LIMITS = dict(channels=CH_MAX, contacts=CT_MAX, groups=GL_MAX, group_ids=GL_IDS,
                   zones=ZN_MAX, zone_channels=ZN_CH_MAX, zone_scan=False, contact0_fixed=True,
-                  keys=True)
+                  keys=True, startup=True)
 
     def __init__(self, image: bytes):
         if len(image) >= IMAGE_SIZE:
@@ -170,6 +196,10 @@ class StockCodeplug:
                 self.zones[i] = Zone(name=name or zone_default_name(i), channels=chans,
                                      scan=[True] * len(chans), cur=cur)
         self.keys = [img[A_CFG2 + off] for off, _ in KEY_SLOTS]
+        self.startup = {}
+        for key, area, off, size, *_ in STARTUP_FIELDS:
+            base = A_CFG if area == "cfg" else A_CFG2
+            self.startup[key] = int.from_bytes(img[base + off:base + off + size], "little")
         cfg = img[A_CFG:A_CFG + 0x400]
         self.settings = Settings(radio_id=bcd_decode(cfg[384:388]),
                                  radio_name=get_name(cfg, 76, 16),
@@ -236,6 +266,11 @@ class StockCodeplug:
             for k, v in enumerate(chans):
                 struct.pack_into("<H", r, 20 + 2 * k, v)
             img[A_ZONE + i * ZN_SIZE:A_ZONE + (i + 1) * ZN_SIZE] = r
+
+        # menu démarrage / affichage
+        for key, area, off, size, *_ in STARTUP_FIELDS:
+            base = A_CFG if area == "cfg" else A_CFG2
+            img[base + off:base + off + size] = int(self.startup[key]).to_bytes(size, "little")
 
         # touches programmables
         for (off, _), val in zip(KEY_SLOTS, self.keys):
