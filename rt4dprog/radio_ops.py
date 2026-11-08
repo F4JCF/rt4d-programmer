@@ -7,12 +7,22 @@ import os
 from typing import Callable, Optional
 
 from . import layout as L
+from . import legacy as O
 from . import stock as S
 from .codeplug import Codeplug
 from .protocol import (BLOCK, SPI_SIZE_KB, CancelCheck, Cancelled, NormalLink, Progress,
                        RadioError)
 
 Log = Callable[[str], None]
+
+LEGACY_WRITE_MSG = (
+    "Ce codeplug vient d'un ANCIEN firmware Radtel (V3.17 ou plus ancien) : l'écriture "
+    "directe n'est pas disponible.\n\nPour modifier cette radio :\n"
+    "1. Enregistrez ce codeplug (Fichier > Enregistrer sous…).\n"
+    "2. Mettez à jour le firmware de la radio (menu Firmware).\n"
+    "3. Lisez la radio (Radio > Lire la radio).\n"
+    "4. Fichier > Importer un codeplug d'ancien firmware… et choisissez le fichier enregistré.\n"
+    "5. Vérifiez puis écrivez dans la radio.")
 
 
 class BlockCache:
@@ -63,6 +73,8 @@ def _detect_format(rd: "BlockCache") -> tuple[str, int]:
         return "refw", bank
     if S.looks_like_stock(rd.read(S.A_CONTACT, 8)):
         return "stock", S.A_CFG
+    if O.looks_like_legacy(rd.read(O.A_CONTACT, 8)):
+        return "legacy", O.A_CFG
     return "inconnu", bank
 
 
@@ -87,6 +99,17 @@ def _read_stock(rd: "BlockCache", progress: Progress, log: Log) -> "S.StockCodep
         if progress:
             progress(i + 1, n, "Lecture")
     return S.StockCodeplug(bytes(image))
+
+
+def _read_legacy(rd: "BlockCache", progress: Progress, log: Log) -> "O.LegacyCodeplug":
+    image = bytearray(b"\xFF" * O.IMAGE_SIZE)
+    blocks = [a // BLOCK + k for a, n in O.READ_RANGES for k in range(n)]
+    log("Lecture du codeplug (ancien firmware officiel Radtel, lecture seule)…")
+    for i, kb in enumerate(blocks):
+        image[kb * BLOCK:(kb + 1) * BLOCK] = rd.read(kb * BLOCK, BLOCK)
+        if progress:
+            progress(i + 1, len(blocks), "Lecture")
+    return O.LegacyCodeplug(bytes(image))
 
 
 def _settings_bank(rd: BlockCache) -> tuple[int, bool]:
@@ -131,12 +154,16 @@ def _read_all(link: NormalLink, progress: Progress, cancel: CancelCheck, log: Lo
     fmt, bank = _detect_format(rd)
     log({"refw": "Firmware REFW (beta 41 ou plus) détecté.",
          "stock": "Firmware officiel Radtel (V3.18 ou plus récent) détecté.",
+         "legacy": "Ancien firmware officiel Radtel (V3.17 ou plus ancien) détecté : "
+                   "lecture seule.",
          "inconnu": "Format NON reconnu (firmware officiel ancien ou REFW ancien) : "
                     "lecture seule."}[fmt])
     if not connected:
         _connect(link, fmt, log)
     if fmt == "stock":
         return _read_stock(rd, progress, log)
+    if fmt == "legacy":
+        return _read_legacy(rd, progress, log)
     refw = fmt == "refw"
     total = _estimate_blocks()
     done = [0]
@@ -176,6 +203,10 @@ def identify(port: str, log: Log = print) -> str:
         if fmt == "stock":
             return ("Radio détectée en mode normal — firmware OFFICIEL Radtel (V3.18 ou plus "
                     "récent). Lecture et écriture disponibles.")
+        if fmt == "legacy":
+            return ("Radio détectée en mode normal — ANCIEN firmware officiel Radtel (V3.17 ou "
+                    "plus ancien). Lecture disponible ; pour modifier la radio, mettez à jour "
+                    "son firmware puis importez l'ancien codeplug (menu Fichier).")
         return ("Radio détectée en mode normal — format non reconnu (firmware ancien ?). "
                 "Lecture et sauvegarde complète possibles, écriture du codeplug bloquée.")
     finally:
@@ -199,6 +230,8 @@ def write_codeplug(port: str, cp: Codeplug, sections: list[str], backup_dir: str
 
     Retourne le chemin du fichier de sauvegarde créé.
     """
+    if getattr(cp, "kind", "refw") == "legacy":
+        raise RadioError(LEGACY_WRITE_MSG)
     if getattr(cp, "kind", "refw") == "stock":
         return _write_stock(port, cp, backup_dir, progress, cancel, log)
     for s in sections:
@@ -388,6 +421,8 @@ def load_any(path: str):
         return Codeplug(data)
     if len(data) >= S.IMAGE_SIZE and S.looks_like_stock(data[S.A_CONTACT:S.A_CONTACT + 5]):
         return S.StockCodeplug(data[:S.IMAGE_SIZE])
+    if len(data) >= O.IMAGE_SIZE and O.looks_like_legacy(data[O.A_CONTACT:O.A_CONTACT + 6]):
+        return O.LegacyCodeplug(data[:O.IMAGE_SIZE])
     if len(data) == SPI_SIZE_KB * BLOCK:
         raise RadioError("Cette sauvegarde complète ne vient pas d'un firmware officiel V3.18+ : "
                          "elle sert uniquement à restaurer la radio (menu Radio).")

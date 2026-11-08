@@ -45,9 +45,23 @@ class BaseTab(QWidget):
         super().__init__()
         self.cp: Codeplug | None = None
 
+    @property
+    def ro(self) -> bool:
+        """Codeplug en lecture seule (ancien firmware Radtel)."""
+        return bool(getattr(self.cp, "read_only", False))
+
     def set_codeplug(self, cp: Codeplug):
         self.cp = cp
+        for b in self.findChildren(QPushButton):
+            b.setEnabled(not self.ro)
         self.refresh()
+        for t in self.findChildren(QTableWidget):
+            if self.ro:
+                if not hasattr(t, "_rw_triggers"):
+                    t._rw_triggers = t.editTriggers()
+                t.setEditTriggers(QAbstractItemView.NoEditTriggers)
+            elif hasattr(t, "_rw_triggers"):
+                t.setEditTriggers(t._rw_triggers)
 
     def refresh(self):
         raise NotImplementedError
@@ -271,7 +285,7 @@ class ChannelsTab(BaseTab):
             self.e_dmrid.setValue(ch.dmr_id)
             self.e_monitor.setChecked(bool(ch.monitor))
         self._show_mode_rows(ch.analog)
-        self.form_box.setEnabled(True)
+        self.form_box.setEnabled(not self.ro)
 
     def _show_mode_rows(self, analog: bool):
         for _, w in self.ana_rows:
@@ -610,7 +624,7 @@ class _MembersTab(BaseTab):
         self.current = self.list.item(row).data(Qt.UserRole)
         obj = self.items()[self.current]
         self.e_name.setText(obj.name)
-        self.right.setEnabled(True)
+        self.right.setEnabled(not self.ro)
         self.fill_members()
 
     def fill_members(self):
@@ -808,7 +822,7 @@ class SettingsTab(BaseTab):
             self.e_id.setValue(s.radio_id)
             self.e_name.setText(s.radio_name)
             self.e_msg.setText(s.startup_message)
-        ok = self.cp.has_settings and (self.cp.is_refw or self.cp.kind == "stock")
+        ok = self.cp.has_settings and (self.cp.is_refw or self.cp.kind == "stock") and not self.ro
         # firmware officiel : le message d'accueil se règle dans « Menu démarrage »
         stock = self.cp.kind == "stock"
         self.msg_label.setVisible(not stock)
@@ -820,6 +834,7 @@ class SettingsTab(BaseTab):
             "L'ID DMR est celui attribué par RadioID.net (7 chiffres pour la France : 208xxxx). "
             "Les autres réglages de la radio sont conservés tels quels."
             if ok else
+            "Lecture seule : ancien firmware Radtel." if self.ro else
             "Réglages indisponibles : ce codeplug ne contient pas de réglages REFW valides. "
             "Lisez la radio pour les obtenir.")
 

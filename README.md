@@ -3,6 +3,7 @@
 Ce logiciel programme le talkie-walkie **Radtel RT-4D** sous **Windows et Linux**. Il reconnaît automatiquement deux firmwares :
 
 - le **firmware officiel Radtel**, à partir de la V3.18 (testé avec la V3.22 ; la V3.25 utilise la même organisation de la mémoire). Les données sont lues et écrites exactement comme le fait le logiciel officiel Radtel (CPS V2.07) ;
+- l'**ancien firmware officiel Radtel** (V3.17 et antérieurs, testé avec la V3.14), en **lecture seule** : le contenu s'affiche correctement et peut être enregistré. Pour modifier la radio, mettez à jour son firmware, lisez-la, puis utilisez *Fichier > Importer un codeplug d'ancien firmware* : canaux, contacts, groupes RX, zones et ID DMR sont convertis au nouveau format ;
 - le firmware communautaire **REFW** de Dual Tachyon, à partir de la beta 41.
 
 ## Fonctions

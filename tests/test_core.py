@@ -523,3 +523,121 @@ def test_stock_startup(stock_radio, tmp_path):
     assert cp2.startup["tone"] == 0 and cp2.startup["line"] == 5 and cp2.startup["work_a"] == 2
     assert cp2.settings.startup_message == "ADRASEC 06"
     assert stock_radio.spi[0x2000 + 23] == 5 and stock_radio.spi[0x1C060 + 20] == 2
+
+
+# ───────────── ancien firmware officiel (V3.14 – V3.17), lecture seule ─────────────
+from rt4dprog import legacy as O
+
+REAL_OLD = "/home/claude/dump2/spi.bin"
+
+
+def make_legacy_spi() -> bytes:
+    spi = bytearray(b"\xFF" * (4096 * 1024))
+    cfg = bytearray(b"\xFF" * 1024)
+    cfg[12:14] = b"\xCD\xAB"
+    cfg[76:81] = b"F4MGJ"
+    cfg[384:388] = bcd_encode(2081860)
+    spi[O.A_CFG:O.A_CFG + 1024] = cfg
+    # contacts : All Call, TG 208, privé
+    for i, (t, did, nm) in enumerate([(2, None, b"All Call"), (1, 208, b"FRANCE TG208"),
+                                      (0, 2081234, b"Gilbert")]):
+        r = bytearray(b"\xFF" * 32)
+        r[0], r[1] = i + 1, t
+        r[2:6] = b"\xAA" * 4 if did is None else bcd_encode(did)
+        r[16:16 + len(nm)] = nm
+        spi[O.A_CONTACT + 32 * i:O.A_CONTACT + 32 * (i + 1)] = r
+    # groupe RX n°1
+    g = bytearray(b"\xFF" * 48)
+    g[0], g[1] = 0, 1
+    g[2:11] = b"TG FRANCE"
+    struct.pack_into("<H", g, 0x10, 1)
+    spi[O.A_TGLIST:O.A_TGLIST + 48] = g
+    # canal numérique et canal analogique (CTCSS 74.4, AM, bande étroite)
+    d = bytearray(b"\x00" * 48)
+    d[0:6] = bytes([1, 1, 0, 1, 6, 0])
+    struct.pack_into("<II", d, 6, 43023750, 43963750)
+    d[0x0F], d[0x10], d[0x12] = 0xFF, 1, 0xFF
+    struct.pack_into("<HH", d, 0x16, 1, 1)
+    d[32:48] = b"Bertagne 83".ljust(16, b"\xFF")
+    a = bytearray(b"\x00" * 48)
+    a[0:4] = bytes([1, 1, 1, 1])
+    a[4:6] = bytes([0xE8, 0x12])
+    struct.pack_into("<II", a, 6, 12345000, 12345000)
+    a[0x0E:0x10] = bytes([0xE8, 0x12])
+    a[0x13] = 0x80
+    a[32:48] = b"Pilote".ljust(16, b"\xFF")
+    spi[O.A_CH:O.A_CH + 48] = d
+    spi[O.A_CH + 48:O.A_CH + 96] = a
+    # zones : une réelle, une vide au nom par défaut, une au-delà de 250
+    for i, (nm, chans) in enumerate([(b"Reseau", [0, 1]), (b"Zone-002", [])]):
+        z = bytearray(b"\xFF" * 512)
+        z[0] = z[1] = len(chans)
+        z[2] = z[3] = 0
+        z[4:4 + len(nm)] = nm
+        for k, c in enumerate(chans):
+            struct.pack_into("<H", z, 0x14 + 2 * k, c)
+        spi[O.A_ZONE + 512 * i:O.A_ZONE + 512 * (i + 1)] = z
+    z = bytearray(b"\xFF" * 512)
+    z[0:4] = bytes([1, 1, 0, 0])
+    z[4:10] = b"ITALIA"
+    struct.pack_into("<H", z, 0x14, 1)
+    spi[O.A_ZONE + 512 * 255:O.A_ZONE + 512 * 256] = z
+    return bytes(spi)
+
+
+@pytest.fixture
+def legacy_radio(monkeypatch):
+    r = FakeRadio(make_legacy_spi())
+    monkeypatch.setattr(protocol.NormalLink, "open", classmethod(lambda cls, port: cls(r)))
+    return r
+
+
+def test_legacy_read(legacy_radio, tmp_path):
+    cp = radio_ops.read_codeplug("X", log=lambda m: None)
+    assert cp.kind == "legacy" and cp.read_only
+    assert cp.settings.radio_id == 2081860 and cp.settings.radio_name == "F4MGJ"
+    d, a = cp.channels[0], cp.channels[1]
+    assert (d.name, d.analog, d.rx, d.tx, d.timeslot, d.color_code, d.power_high) == \
+        ("Bertagne 83", False, 43023750, 43963750, 1, 6, True)
+    assert d.contact == 1 and d.group == 0
+    assert (a.name, a.analog, a.modulation, a.narrow, a.rx_tone, a.tx_tone, a.scan) == \
+        ("Pilote", True, 1, True, "74.4", "74.4", False)
+    assert [c.name for c in cp.contacts.values()] == ["All Call", "FRANCE TG208", "Gilbert"]
+    assert cp.groups[0].contacts == [1]
+    assert sorted(cp.zones) == [0, 255] and cp.zones[0].channels == [0, 1]
+    assert "radio" in radio_ops.identify("X").lower()
+    with pytest.raises(radio_ops.RadioError):
+        radio_ops.write_codeplug("X", cp, [], str(tmp_path), log=lambda m: None)
+    assert legacy_radio.writes == []
+    # fichier enregistré puis rouvert
+    p = tmp_path / "old.rt4d"
+    cp.save(str(p))
+    assert radio_ops.load_any(str(p)).kind == "legacy"
+
+
+def test_legacy_convert_and_write(stock_radio, tmp_path):
+    old = O.LegacyCodeplug(make_legacy_spi())
+    cp = radio_ops.read_codeplug("X", log=lambda m: None)     # radio mise à jour (V3.18+)
+    assert cp.kind == "stock"
+    notes = O.convert_into(old, cp)
+    assert any("ITALIA" in n for n in notes)
+    radio_ops.write_codeplug("X", cp, [], str(tmp_path), log=lambda m: None)
+    cp2 = radio_ops.read_codeplug("X", log=lambda m: None)
+    assert cp2.settings.radio_id == 2081860 and cp2.settings.radio_name == "F4MGJ"
+    assert [c.name for c in cp2.contacts.values()] == ["All Call", "FRANCE TG208", "Gilbert"]
+    d = cp2.channels[0]
+    assert d.name == "Bertagne 83" and d.rx == 43023750 and d.timeslot == 1 and d.color_code == 6
+    assert d.contact == 1 and cp2.groups[d.group].name == "TG FRANCE"
+    a = cp2.channels[1]
+    assert a.analog and a.modulation == 1 and a.narrow and a.rx_tone == "74.4" and not a.scan
+    names = [z.name for z in cp2.zones.values()]
+    assert "Reseau" in names and "ITALIA" in names
+
+
+@pytest.mark.skipif(not os.path.exists(REAL_OLD), reason="sauvegarde V3.14 absente")
+def test_real_legacy_dump():
+    cp = radio_ops.load_any(REAL_OLD)
+    assert cp.kind == "legacy"
+    assert len(cp.channels) == 477 and len(cp.contacts) == 154 and len(cp.groups) == 11
+    assert len(cp.zones) == 17
+    assert cp.channels[32].name == "Bertagne 83" and cp.contacts[cp.channels[32].contact].name == "VAR-Toulon"

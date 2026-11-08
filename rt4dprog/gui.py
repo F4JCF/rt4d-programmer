@@ -21,7 +21,7 @@ from . import APP_NAME, __version__, csvio
 from . import layout as L
 from . import addressbook as AB
 from . import firmware_pkg as FW
-from . import protocol, radio_ops, updater
+from . import legacy, protocol, radio_ops, updater
 from .codeplug import Codeplug
 from .gui_tabs import (ChannelsTab, ContactsTab, GroupsTab, KeysTab, SettingsTab, StartupTab,
                        ZonesTab)
@@ -669,6 +669,9 @@ class MainWindow(QMainWindow):
         self._act(m, "Importer des contacts (CSV)…", lambda: self.import_csv("contacts"))
         self._act(m, "Exporter les contacts (CSV)…", lambda: self.export_csv("contacts"))
         m.addSeparator()
+        self._act(m, "Importer un codeplug d'ancien firmware (V3.17 ou plus ancien)…",
+                  self.import_legacy)
+        m.addSeparator()
         self._act(m, "Quitter", self.close, "Ctrl+Q")
 
         m = self.menuBar().addMenu("&Radio")
@@ -730,6 +733,8 @@ class MainWindow(QMainWindow):
         self.settings.setValue("last_dir", os.path.dirname(path))
 
     def mark_dirty(self):
+        if getattr(self.cp, "read_only", False):
+            return
         self.dirty = True
         self.update_title()
 
@@ -742,6 +747,11 @@ class MainWindow(QMainWindow):
         if getattr(cp, "kind", "refw") == "stock":
             txt, col = ("Firmware officiel Radtel (V3.18 ou plus récent) : lecture et écriture "
                         "disponibles."), "#1e7e34"
+        elif getattr(cp, "kind", "refw") == "legacy":
+            txt, col = ("Ancien firmware officiel Radtel (V3.17 ou plus ancien) : LECTURE SEULE. "
+                        "Pour modifier la radio : enregistrez ce codeplug, mettez à jour le "
+                        "firmware (menu Firmware), lisez la radio, puis Fichier > Importer un "
+                        "codeplug d'ancien firmware."), "#c0392b"
         elif not cp.has_settings:
             txt, col = ("Codeplug sans réglages radio : vous pouvez préparer canaux, contacts et "
                         "zones, puis les écrire (les réglages de la radio seront conservés)."), "#2c3e50"
@@ -817,7 +827,7 @@ class MainWindow(QMainWindow):
         return True
 
     def save_as(self) -> bool:
-        ext = ".rt4d" if getattr(self.cp, "kind", "refw") == "stock" else ".4rdmf"
+        ext = ".rt4d" if getattr(self.cp, "kind", "refw") in ("stock", "legacy") else ".4rdmf"
         label = "Codeplug firmware officiel (*.rt4d)" if ext == ".rt4d" else "Codeplug REFW (*.4rdmf)"
         path, _ = QFileDialog.getSaveFileName(self, "Enregistrer le codeplug",
                                               os.path.join(self.last_dir(), "RT4D" + ext), label)
@@ -853,6 +863,50 @@ class MainWindow(QMainWindow):
         if warn:
             msg += "\n\nAvertissements :\n" + "\n".join(warn[:20])
         QMessageBox.information(self, "Import CSV", msg)
+
+    def import_legacy(self):
+        if getattr(self.cp, "kind", "refw") != "stock":
+            QMessageBox.information(
+                self, "Importer un ancien codeplug",
+                "Lisez d'abord la radio mise à jour (firmware officiel V3.18 ou plus récent) : "
+                "l'ancien codeplug sera copié dans ce qui a été lu, puis vous pourrez l'écrire.")
+            return
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Codeplug d'ancien firmware", self.last_dir(),
+            "Codeplug ou sauvegarde (*.rt4d *.bin);;Tous les fichiers (*)")
+        if not path:
+            return
+        try:
+            old = radio_ops.load_any(path)
+        except Exception as e:
+            QMessageBox.critical(self, "Importer un ancien codeplug", str(e))
+            return
+        if getattr(old, "kind", "") != "legacy":
+            QMessageBox.warning(self, "Importer un ancien codeplug",
+                                "Ce fichier ne vient pas d'un ancien firmware Radtel "
+                                "(V3.17 ou plus ancien). Ouvrez-le avec Fichier > Ouvrir.")
+            return
+        r = QMessageBox.question(
+            self, "Importer un ancien codeplug",
+            f"{len(old.channels)} canaux, {len(old.contacts)} contacts, {len(old.groups)} groupes RX "
+            f"et {len(old.zones)} zones vont REMPLACER ceux du codeplug affiché, avec l'ID DMR "
+            f"et le nom de la radio.\n\nLes autres réglages de la radio sont conservés. Continuer ?")
+        if r != QMessageBox.Yes:
+            return
+        notes = legacy.convert_into(old, self.cp)
+        self.cp.commit()
+        self.set_last_dir(path)
+        self.load_codeplug(self.cp, self.path)
+        self.mark_dirty()
+        self.log(f"Ancien codeplug importé : {path}")
+        for n in notes:
+            self.log("  " + n)
+        msg = ("Import terminé.\n\nVérifiez surtout, canal par canal, la puissance, la largeur de "
+               "bande et le balayage : ces réglages de l'ancien firmware ont été convertis au "
+               "mieux. Écrivez ensuite dans la radio.")
+        if notes:
+            msg += "\n\nRemarques :\n• " + "\n• ".join(notes[:15])
+        QMessageBox.information(self, "Importer un ancien codeplug", msg)
 
     def export_csv(self, what):
         default = "canaux.csv" if what == "channels" else "contacts.csv"
@@ -890,13 +944,18 @@ class MainWindow(QMainWindow):
             self.update_title()
             self.log(f"Lecture terminée : {len(cp.channels)} canaux, {len(cp.contacts)} contacts, "
                      f"{len(cp.groups)} groupes RX, {len(cp.zones)} zones.")
-            if getattr(cp, "kind", "refw") == "refw" and not cp.is_refw:
+            if getattr(cp, "kind", "refw") == "legacy":
+                QMessageBox.information(self, "Ancien firmware Radtel", radio_ops.LEGACY_WRITE_MSG)
+            elif getattr(cp, "kind", "refw") == "refw" and not cp.is_refw:
                 QMessageBox.warning(self, "Format non reconnu",
                                     "Le format de cette radio n'est pas reconnu (firmware ancien ?). "
                                     "Les données affichées peuvent être fausses et l'écriture est "
                                     "bloquée.\n\nPensez à enregistrer ce fichier comme sauvegarde.")
 
     def write_radio(self):
+        if getattr(self.cp, "kind", "refw") == "legacy":
+            QMessageBox.information(self, "Ancien firmware Radtel", radio_ops.LEGACY_WRITE_MSG)
+            return
         port = self.port_name()
         if not port:
             return
