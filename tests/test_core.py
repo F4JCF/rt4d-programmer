@@ -687,3 +687,15 @@ def test_real_legacy_roundtrip():
     cp = O.LegacyCodeplug(data)
     assert cp.validate() == []
     assert cp.build()[:0xE0000] == data[:0xE0000]
+
+
+def test_linux_desktop_entry(tmp_path, monkeypatch):
+    from rt4dprog import linux_desktop as LD
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    assert LD.install("/opt/rt4d/RT4D-Programmer") is True
+    assert LD.install("/opt/rt4d/RT4D-Programmer") is False       # déjà à jour
+    txt = (tmp_path / "applications" / "rt4d-programmer.desktop").read_text()
+    assert 'Exec="/opt/rt4d/RT4D-Programmer"' in txt
+    assert (tmp_path / "icons/hicolor/256x256/apps/rt4d-programmer.png").exists()
+    assert LD.install("/home/x/RT4D-Programmer") is True           # exécutable déplacé

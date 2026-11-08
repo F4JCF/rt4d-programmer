@@ -72,6 +72,8 @@ jobs:
             (cd out && 7z a "../rel/${{ matrix.name }}.zip" . > /dev/null)
           else
             chmod +x "out/${{ matrix.exe }}"
+            cp install.sh icon.png out/
+            chmod +x out/install.sh
             cp out/RT4D-Programmer rel/RT4D-Programmer-Linux
             (cd out && zip -r "../rel/${{ matrix.name }}.zip" .)
           fi

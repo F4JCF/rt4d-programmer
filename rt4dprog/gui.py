@@ -21,7 +21,7 @@ from . import APP_NAME, __version__, csvio
 from . import layout as L
 from . import addressbook as AB
 from . import firmware_pkg as FW
-from . import legacy, protocol, radio_ops, updater
+from . import legacy, linux_desktop, protocol, radio_ops, updater
 from .codeplug import Codeplug
 from .gui_tabs import (ChannelsTab, ContactsTab, GroupsTab, KeysTab, SettingsTab, StartupTab,
                        ZonesTab)
@@ -690,6 +690,9 @@ class MainWindow(QMainWindow):
         m = self.menuBar().addMenu("&Aide")
         self._act(m, "Mode d'emploi", self.show_help, "F1")
         m.addSeparator()
+        if sys.platform.startswith("linux") and getattr(sys, "frozen", False):
+            self._act(m, "Ajouter l'icône sur le bureau", self.linux_shortcut)
+            m.addSeparator()
         self._act(m, "À propos", self.about)
 
         # Mise à jour, à côté de « Aide » (comme CAT Pilot)
@@ -701,6 +704,13 @@ class MainWindow(QMainWindow):
             lambda on: self.settings.setValue("update_check", "true" if on else "false"))
         self.menu_upd.addAction(self.act_upd_start)
         self._act(self.menu_upd, "Voir toutes les versions sur GitHub", self.open_releases_page)
+
+    def linux_shortcut(self):
+        linux_desktop.install(desktop_shortcut=True)
+        QMessageBox.information(
+            self, "Icône", "L'icône RT4D Programmer a été ajoutée sur le bureau et dans le menu "
+            "des applications.\n\nSur certains bureaux (GNOME), faites un clic droit sur l'icône "
+            "puis « Autoriser le lancement » la première fois.")
 
     # -- utilitaires --
     def log(self, msg: str):
@@ -1144,8 +1154,15 @@ Carte mémoire du codeplug documentée par le projet RT4D Editor (jcalado).</p>
 
 
 def main():
+    if "--installer-menu" in sys.argv:          # utilisé par install.sh (Linux)
+        linux_desktop.install(desktop_shortcut="--bureau" in sys.argv)
+        print("RT4D Programmer : icône et entrée de menu installées.")
+        return
+    if sys.platform.startswith("linux") and getattr(sys, "frozen", False):
+        linux_desktop.install()                   # icône + menu des applications
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
+    app.setDesktopFileName(linux_desktop.APP_ID)
     app.setStyle("Fusion")
     icon = os.path.join(getattr(sys, "_MEIPASS", os.path.dirname(os.path.dirname(__file__))), "icon.png")
     if os.path.exists(icon):

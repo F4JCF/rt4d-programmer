@@ -28,7 +28,7 @@ Ce logiciel programme le talkie-walkie **Radtel RT-4D** sous **Windows et Linux*
 Dans la page **Releases** du dépôt :
 
 - Windows : `RT4D-Programmer-Setup-x.y.z.exe` installe le logiciel dans votre profil (sans droits administrateur), avec un raccourci. Vous pouvez aussi lancer directement `RT4D-Programmer.exe`. Si SmartScreen affiche un avertissement, cliquez sur « Informations complémentaires » puis « Exécuter quand même ».
-- Linux : `RT4D-Programmer-Linux` (rendez-le exécutable). Il peut être nécessaire de lancer une fois :
+- Linux : décompressez `RT4D-Programmer-Linux.zip` puis lancez `sh install.sh`. Le logiciel est copié dans `~/.local/bin`, avec son icône dans le menu des applications et sur le bureau. Vous pouvez aussi lancer directement `RT4D-Programmer-Linux` (rendez-le exécutable) : l'icône et l'entrée de menu sont alors ajoutées au premier lancement. Il peut être nécessaire de lancer une fois :
   ```
   sudo usermod -aG dialout $USER      # accès au port série (fermez puis rouvrez la session)
   sudo apt install libxcb-cursor0     # nécessaire à l'interface Qt sur certaines distributions
