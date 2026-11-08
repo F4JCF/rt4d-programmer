@@ -298,11 +298,38 @@ def backup_spi(port: str, path: str, progress: Progress = None, cancel: CancelCh
                 pass
 
 
-def restore_regions_from_dump(dump: bytes, include_calibration: bool) -> list[tuple[int, str, bytes]]:
-    """Prépare les régions à réécrire à partir d'une sauvegarde 4 Mo."""
+def dump_format(dump: bytes) -> str:
+    """Firmware d'origine d'une sauvegarde complète : 'refw', 'stock', 'legacy' ou 'inconnu'."""
+    if any(dump[b + 0xFFC:b + 0x1000] == L.MAGIC for b in L.SETTINGS_BANKS):
+        return "refw"
+    if S.looks_like_stock(dump[S.A_CONTACT:S.A_CONTACT + 8]):
+        return "stock"
+    if O.looks_like_legacy(dump[O.A_CONTACT:O.A_CONTACT + 8]):
+        return "legacy"
+    return "inconnu"
+
+
+def restore_regions_from_dump(dump: bytes, include_calibration: bool,
+                              fmt: Optional[str] = None) -> list[tuple[int, str, bytes]]:
+    """Prépare les régions à réécrire à partir d'une sauvegarde 4 Mo.
+    fmt : firmware de la radio ('refw' ou 'stock'). Chaque firmware a sa propre carte des régions."""
     if len(dump) != SPI_SIZE_KB * BLOCK:
         raise RadioError(f"Le fichier ne fait pas 4 Mo ({len(dump)} octets) : "
                          "ce n'est pas une sauvegarde complète du RT-4D.")
+    src = dump_format(dump)
+    fmt = fmt or src
+    if fmt not in ("refw", "stock"):
+        raise RadioError("La restauration complète n'est possible qu'avec le firmware REFW ou le "
+                         "firmware officiel Radtel V3.18 ou plus récent.")
+    if src != fmt:
+        names = {"refw": "REFW", "stock": "officiel Radtel V3.18+", "legacy": "officiel ancien (V3.17 ou avant)",
+                 "inconnu": "inconnu"}
+        raise RadioError(f"Cette sauvegarde vient d'un firmware {names[src]}, mais la radio contient "
+                         f"le firmware {names[fmt]}. Les deux n'utilisent pas la même organisation de "
+                         "la mémoire : restauration refusée. Remettez d'abord le même firmware.")
+    if fmt == "stock":
+        return [(region, name, dump[addr:addr + size]) for region, addr, size, name in S.RESTORE_REGIONS
+                if include_calibration or region != 0x40]
     bank = L.SETTINGS_BANKS[0]
     for b in L.SETTINGS_BANKS:
         if dump[b + 0xFFC:b + 0x1000] == L.MAGIC:
@@ -330,9 +357,11 @@ def restore_regions_from_dump(dump: bytes, include_calibration: bool) -> list[tu
 
 def restore_spi(port: str, dump: bytes, include_calibration: bool, progress: Progress = None,
                 cancel: CancelCheck = None, log: Log = print):
-    regions = restore_regions_from_dump(dump, include_calibration)
     link = _open_normal(port, log)
     try:
+        fmt, _ = _detect_format(BlockCache(link, cancel))
+        regions = restore_regions_from_dump(dump, include_calibration, fmt)
+        _connect(link, fmt, log)
         total = sum(len(d) // BLOCK for _, _, d in regions)
         done = [0]
 
@@ -472,3 +501,81 @@ def load_any(path: str):
         raise RadioError("Cette sauvegarde complète ne vient pas d'un firmware officiel V3.18+ : "
                          "elle sert uniquement à restaurer la radio (menu Radio).")
     raise RadioError(f"Format de fichier non reconnu ({len(data)} octets).")
+
+
+# ───────────────────── police ASCII (firmware officiel) ─────────────────────
+
+def read_font(port: str, progress: Progress = None, cancel: CancelCheck = None,
+              log: Log = print) -> bytes:
+    """Lit la police ASCII (8 Ko) d'une radio au firmware officiel V3.18+."""
+    from . import fontpatch as P
+    link = _open_normal(port, log)
+    try:
+        rd = BlockCache(link, cancel)
+        fmt, _ = _detect_format(rd)
+        if fmt != "stock":
+            raise RadioError("La police avec accents n'est prévue que pour le firmware officiel "
+                             "Radtel V3.18 ou plus récent.")
+        font = rd.read(S.FONT_ADDR, S.FONT_SIZE)
+        link.close_session()
+    finally:
+        link.close()
+    err = P.check_font(font)
+    if err:
+        raise RadioError("Police de la radio non reconnue : " + err)
+    return font
+
+
+def write_font(port: str, font: bytes, backup_dir: str, progress: Progress = None,
+               cancel: CancelCheck = None, log: Log = print) -> str:
+    """Écrit une police ASCII de 8 Ko (région 0xA0). L'ancienne police est d'abord enregistrée
+    dans backup_dir. La police écrite est relue et comparée. Retourne le chemin de la sauvegarde."""
+    from . import fontpatch as P
+    err = P.check_font(font)
+    if err:
+        raise RadioError("Police refusée : " + err)
+    link = _open_normal(port, log)
+    try:
+        rd = BlockCache(link, cancel)
+        fmt, _ = _detect_format(rd)
+        if fmt != "stock":
+            raise RadioError("La radio ne contient pas le firmware officiel Radtel V3.18+ : "
+                             "écriture de la police annulée.")
+        _connect(link, fmt, log)
+        log("Lecture de la police actuelle…")
+        old = rd.read(S.FONT_ADDR, S.FONT_SIZE)
+        os.makedirs(backup_dir, exist_ok=True)
+        stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        bk = os.path.join(backup_dir, f"RT4D-police-avant-{stamp}.bin")
+        with open(bk, "wb") as f:
+            f.write(old)
+        log(f"Police actuelle enregistrée : {bk}")
+        if old == font:
+            log("La radio contient déjà cette police : rien à écrire.")
+            link.close_session()
+            return bk
+        log("Écriture de la police (8 blocs)…")
+        link.write_region(S.FONT_REGION, font, progress, cancel, "Police")
+        log("Relecture de contrôle…")
+        back = BlockCache(link).read(S.FONT_ADDR, S.FONT_SIZE)
+        if back != font:
+            raise RadioError("La police relue ne correspond pas à la police envoyée. "
+                             f"Recommencez, ou remettez la police d'origine ({bk}).")
+        link.close_session()
+        log("Police écrite et vérifiée.")
+        return bk
+    finally:
+        link.close()
+
+
+def font_from_file(path: str) -> bytes:
+    """Police de 8 Ko depuis une sauvegarde de police (8 Ko) ou une sauvegarde complète (4 Mo)."""
+    with open(path, "rb") as f:
+        data = f.read()
+    if len(data) == SPI_SIZE_KB * BLOCK:
+        data = data[S.FONT_ADDR:S.FONT_ADDR + S.FONT_SIZE]
+    from . import fontpatch as P
+    err = P.check_font(data)
+    if err:
+        raise RadioError(f"Ce fichier ne contient pas une police du RT-4D : {err}")
+    return data

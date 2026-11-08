@@ -49,6 +49,10 @@ qui vous appellent.</p>
 Le bouton « Émission limitée aux bandes radioamateur » n'autorise l'émission que de 144 à 146
 et de 430 à 440 MHz. Écrivez ensuite dans la radio. Hors de ces bandes, le poste affiche
 « Prohibit TX » au lieu d'émettre. « Aucune limite » rétablit le réglage d'usine.</p>
+<h4>Police avec accents (firmware officiel)</h4>
+<p><b>Radio → Police avec accents</b> : redessine 7 caractères inutilisés de la police du poste en
+é è ê à ç î É. L'ancienne police est enregistrée dans le dossier des sauvegardes, et le bouton
+« Remettre une police enregistrée » la réinstalle.</p>
 <h4>Changer de firmware (mise à jour ou retour arrière)</h4>
 <ol>
 <li>Faites d'abord une <b>sauvegarde complète</b> (Radio → Sauvegarde complète, environ 6 min).</li>
@@ -690,6 +694,8 @@ class MainWindow(QMainWindow):
         m.addSeparator()
         self._act(m, "Sauvegarde complète de la flash (4 Mo)…", self.backup_full)
         self._act(m, "Restaurer une sauvegarde complète…", self.restore_full)
+        m.addSeparator()
+        self._act(m, "Police avec accents (é è ê à ç î É)…", self.font_accents)
 
         m = self.menuBar().addMenu("F&irmware")
         self._act(m, "Flasher un firmware (mise à jour / retour arrière)…", self.flash_fw)
@@ -1030,6 +1036,58 @@ class MainWindow(QMainWindow):
                                dlg.calib.isChecked())
         if ok:
             QMessageBox.information(self, "Restauration", "Restauration terminée. Redémarrez la radio.")
+
+    def font_accents(self):
+        port = self.port_name()
+        if not port:
+            return
+        box = QMessageBox(self)
+        box.setWindowTitle("Police avec accents")
+        box.setTextFormat(Qt.RichText)
+        box.setText(
+            "<b>Police avec accents pour le firmware officiel Radtel</b><br><br>"
+            "La police du poste n'a pas d'accents. Cette fonction redessine 7 caractères inutilisés "
+            "par les menus :<br>"
+            "<code>`</code> → é &nbsp; <code>{</code> → è &nbsp; <code>^</code> → ê &nbsp; "
+            "<code>}</code> → à &nbsp; <code>|</code> → ç &nbsp; <code>~</code> → î &nbsp; "
+            "<code>\\</code> → É<br><br>"
+            "Elle est nécessaire au firmware traduit avec accents (FR03). Sans le firmware FR03, "
+            "les menus ne changent pas.<br><br>"
+            "Seule la police (8 Ko) est réécrite. L'ancienne police est d'abord enregistrée dans le "
+            "dossier des sauvegardes, puis la police écrite est relue et vérifiée.<br>"
+            "Radio allumée <b>normalement</b> (pas en mode PTT).")
+        b_inst = box.addButton("Installer les accents", QMessageBox.AcceptRole)
+        b_rest = box.addButton("Remettre une police enregistrée…", QMessageBox.ActionRole)
+        box.addButton("Annuler", QMessageBox.RejectRole)
+        box.exec()
+        clicked = box.clickedButton()
+        from . import fontpatch as P
+        if clicked is b_inst:
+            ok, font = TaskDialog.run(self, "Lecture de la police", radio_ops.read_font, port)
+            if not ok:
+                return
+            if P.is_accented(font):
+                QMessageBox.information(self, "Police", "La radio contient déjà la police avec accents.")
+                return
+            new = P.build_accented(font)
+        elif clicked is b_rest:
+            path, _ = QFileDialog.getOpenFileName(
+                self, "Police ou sauvegarde complète", self.backup_dir(),
+                "Police (8 Ko) ou sauvegarde complète (4 Mo) (*.bin);;Tous les fichiers (*)")
+            if not path:
+                return
+            try:
+                new = radio_ops.font_from_file(path)
+            except RadioError as e:
+                QMessageBox.critical(self, "Police", str(e))
+                return
+        else:
+            return
+        ok, res = TaskDialog.run(self, "Écriture de la police", radio_ops.write_font, port, new,
+                                 self.backup_dir())
+        if ok:
+            QMessageBox.information(self, "Police", "Police écrite et vérifiée.\n\nÉteignez puis "
+                                    f"rallumez la radio.\n\nAncienne police enregistrée :\n{res}")
 
     def flash_fw(self):
         dlg = FirmwareDialog(self, self.port.currentData(), self.settings.value("fw_dir", self.last_dir()))

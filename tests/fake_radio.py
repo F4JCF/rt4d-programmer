@@ -11,7 +11,8 @@ from rt4dprog import stock as S
 
 REGION_ADDR = {r: a for r, a, _, _ in L.SPI_RESTORE_REGIONS}
 REGION_ADDR[0x80] = 0x0C7000
-STOCK_REGION_ADDR = {r: a for r, a, _, _ in S.WRITE_REGIONS}
+STOCK_REGION_ADDR = {r: a for r, a, _, _ in S.RESTORE_REGIONS}
+STOCK_REGION_ADDR.update({r: a for r, a, _, _ in S.WRITE_REGIONS})
 from rt4dprog import legacy as O  # noqa: E402
 LEGACY_REGION_ADDR = {r: a for r, a, _, _ in O.WRITE_REGIONS}
 

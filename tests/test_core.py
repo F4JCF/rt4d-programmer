@@ -559,6 +559,62 @@ def test_freq_limits_validation(stock_radio):
     assert len(pb) == 2 and "n°1" in pb[0] and "n°2" in pb[1]
 
 
+def _fake_font() -> bytes:
+    f = bytearray(b"\x00" * 0x2000)
+    for c in range(33, 127):
+        o = (c - 32) * 14
+        f[o:o + 14] = bytes([0x3C, 0x00, 0x42, 0x00, 0x81, 0x01, 0x81, 0x01, 0x42, 0x00, 0x3C, 0x00, 0, 0])
+    return bytes(f)
+
+
+def test_fontpatch():
+    from rt4dprog import fontpatch as P
+    font = _fake_font()
+    assert P.check_font(font) is None and not P.is_accented(font)
+    acc = P.build_accented(font)
+    assert P.is_accented(acc) and P.build_accented(acc) == acc
+    changed = {i // 14 + 32 for i in range(len(font)) if font[i] != acc[i]}
+    assert {chr(c) for c in changed} == set(P.MAP)
+    assert P.to_radio("Réglages Arrêt Reçus Éclairage") == "R`glages Arr^t Re|us \\clairage"
+    assert P.check_font(b"\xFF" * 0x2000)
+
+
+def test_write_font(stock_radio, tmp_path):
+    from rt4dprog import fontpatch as P
+    stock_radio.spi[S.FONT_ADDR:S.FONT_ADDR + S.FONT_SIZE] = _fake_font()
+    font = radio_ops.read_font("X", log=lambda m: None)
+    acc = P.build_accented(font)
+    bk = radio_ops.write_font("X", acc, str(tmp_path), log=lambda m: None)
+    assert bytes(stock_radio.spi[S.FONT_ADDR:S.FONT_ADDR + S.FONT_SIZE]) == acc
+    assert open(bk, "rb").read() == font
+    assert {r for r, _ in stock_radio.writes} == {0xA0} and len(stock_radio.writes) == 8
+    assert radio_ops.font_from_file(bk) == font
+    radio_ops.write_font("X", font, str(tmp_path), log=lambda m: None)      # retour à l'origine
+    assert bytes(stock_radio.spi[S.FONT_ADDR:S.FONT_ADDR + S.FONT_SIZE]) == font
+
+
+def test_restore_stock_map():
+    dump = bytes(make_stock_spi())
+    regs = radio_ops.restore_regions_from_dump(dump, False)
+    codes = [r for r, _, _ in regs]
+    assert 0x40 not in codes and not {0x99, 0x9B, 0xA2} & set(codes)
+    assert codes[:9] == [0x90, 0x91, 0x92, 0x93, 0x94, 0x95, 0x96, 0x97, 0x98]
+    sizes = {r: len(d) for r, _, d in regs}
+    assert sizes[0x93] == 128 * 1024 and sizes[0x94] == 208 * 1024 and sizes[0xA0] == 8 * 1024
+    with pytest.raises(protocol.RadioError, match="même organisation"):
+        radio_ops.restore_regions_from_dump(dump, False, "refw")
+
+
+def test_restore_stock_roundtrip(stock_radio):
+    dump = bytearray(stock_radio.spi)
+    dump[S.A_CH + 0x20:S.A_CH + 0x24] = b"ABCD"                  # nom du canal 1 modifié
+    dump[S.FONT_ADDR + 100] ^= 0xFF
+    radio_ops.restore_spi("X", bytes(dump), False, log=lambda m: None)
+    assert bytes(stock_radio.spi[S.A_CH:S.A_CH + 48]) == bytes(dump[S.A_CH:S.A_CH + 48])
+    assert stock_radio.spi[S.FONT_ADDR + 100] == dump[S.FONT_ADDR + 100]
+    assert {r for r, _ in stock_radio.writes} == {r for r, *_ in S.RESTORE_REGIONS} - {0x40}
+
+
 # ───────────── ancien firmware officiel (V3.14 – V3.17), lecture seule ─────────────
 from rt4dprog import legacy as O
 

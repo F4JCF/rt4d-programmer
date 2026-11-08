@@ -49,6 +49,36 @@ WRITE_REGIONS = [
     (0x98, A_FM, 4, "Radio FM"),
 ]
 
+# Régions acceptées en écriture par le firmware officiel (gestionnaire série du firmware V3.25,
+# 0x080189EA) : code -> (adresse SPI, taille). Au premier bloc d'une région, le firmware efface
+# toute la région (secteurs de 4 Ko), puis écrit les blocs de 1 Ko reçus.
+# Les codes absents de cette liste (0x99, 0x9B, 0xA2…) ne sont PAS gérés par le firmware officiel :
+# il réutiliserait alors l'adresse de la région précédente. Ne jamais les envoyer.
+RESTORE_REGIONS = [
+    (0x40, 0x000000, 0x001000, "Calibration"),
+    (0x90, 0x002000, 0x001000, "Réglages"),
+    (0x91, 0x004000, 0x00C000, "Canaux"),
+    (0x92, 0x01C000, 0x001000, "VFO"),
+    (0x93, 0x01E000, 0x020000, "Zones"),
+    (0x94, 0x05E000, 0x034000, "Contacts"),
+    (0x95, 0x0C6000, 0x005000, "Groupes RX"),
+    (0x96, 0x0D0000, 0x003000, "Chiffrement"),
+    (0x97, 0x0D6000, 0x001000, "SMS prédéfinis"),
+    (0x98, 0x0F0000, 0x001000, "Radio FM"),
+    (0x9A, 0x100000, 0x001000, "Logo de démarrage"),
+    (0x9C, 0x14C000, 0x018000, "Table Unicode"),
+    (0x9D, 0x164000, 0x024000, "Phonèmes"),
+    (0x9E, 0x188000, 0x010000, "Tables 9E"),
+    (0x9F, 0x198000, 0x004000, "Tables 9F"),
+    (0xA0, 0x19C000, 0x002000, "Police ASCII"),
+    (0xA1, 0x19E000, 0x0B4000, "Police GBK"),
+    (0xA3, 0x352000, 0x09E000, "Voix"),
+    (0xA5, 0x3F0000, 0x010000, "Table Unicode 2"),
+]
+FONT_REGION = 0xA0
+FONT_ADDR, FONT_SIZE = 0x19C000, 0x2000
+
+
 # Blocs lus par le CPS officiel (numéros de Ko) : 522 blocs
 READ_BLOCKS = ([8] + list(range(16, 64)) + [112] + list(range(120, 248))
                + list(range(376, 584)) + list(range(792, 812)) + list(range(832, 844))
