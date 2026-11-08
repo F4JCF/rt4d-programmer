@@ -109,7 +109,7 @@ KEY_FUNCTIONS = [
     "DMR : neutralisation à distance (stun)", "DMR : destruction à distance (kill)",
     "DMR : réactivation à distance", "Détection en ligne", "Affichage de l'appelé",
     "Bascule AM/FM (réception)", "Spectre analogique", "Niveau de squelch",
-    "Pas de fréquence", "Bascule analogique/DMR", "Canal météo NOAA",
+    "Pas de fréquence", "Bascule analogique/DMR", "Canal météo NOAA (Mode SATER avec le firmware F4JCF)",
     "Enregistrer le canal", "Nouveau SMS", "Menu SMS", "Luminosité de l'écran",
     "VOX analogique", "Choix de la zone", "Mode promiscuité (DMR)",
     "Double slot marche/arrêt", "Changement de slot", "Changement de code couleur",
