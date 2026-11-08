@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime
 import os
 import sys
 import traceback
@@ -64,6 +65,12 @@ et de 430 à 440 MHz. Écrivez ensuite dans la radio. Hors de ces bandes, le pos
 </ol>
 <p>Ce logiciel flashe le firmware principal (MCU). Il ne flashe pas le firmware
 de la puce DMR. Le firmware est extrait du paquet officiel Radtel sans lancer l'outil Radtel.</p>
+<h4>Sauvegarde Nextcloud</h4>
+<p><b>Fichier → Sauvegarde Nextcloud</b> : adresse de votre Nextcloud, utilisateur et
+<b>mot de passe d'application</b> (Nextcloud : Paramètres → Sécurité). Le dossier des
+sauvegardes (sauvegardes complètes, état de la radio avant chaque écriture, polices), le
+codeplug ouvert et les réglages sont envoyés une fois par jour et après chaque nouvelle
+sauvegarde. Seuls les nouveaux fichiers partent ; rien n'est effacé sur le serveur.</p>
 <h4>Linux</h4>
 <p>Si le port est refusé : <code>sudo usermod -aG dialout $USER</code>, puis fermez et rouvrez la session.</p>
 """
@@ -653,6 +660,9 @@ class MainWindow(QMainWindow):
         self._upd_timer = QTimer(self)
         self._upd_timer.timeout.connect(self._periodic_update_check)
         self._upd_timer.start(6 * 3600 * 1000)
+        from .backup import Backup
+        self.backup = Backup(self)
+        self.backup.status.connect(self.on_backup_status)
         self.refresh_ports()
         self.load_codeplug(self.cp, None)
         self.log(f"{APP_NAME} {__version__} prêt.")
@@ -682,6 +692,9 @@ class MainWindow(QMainWindow):
         m.addSeparator()
         self._act(m, "Importer un codeplug d'ancien firmware (V3.17 ou plus ancien)…",
                   self.import_legacy)
+        m.addSeparator()
+        self._act(m, "Sauvegarde Nextcloud…", self.backup_dialog)
+        self._act(m, "Ouvrir le dossier des sauvegardes", self.open_backup_dir)
         m.addSeparator()
         self._act(m, "Quitter", self.close, "Ctrl+Q")
 
@@ -992,6 +1005,7 @@ class MainWindow(QMainWindow):
         if ok:
             QMessageBox.information(self, "Écriture terminée",
                                     f"Programmation réussie.\n\nSauvegarde de l'état précédent :\n{res}")
+            self.backup.after_backup()
         self.load_codeplug(self.cp, self.path)
         self.dirty = True
         self.update_title()
@@ -1004,7 +1018,8 @@ class MainWindow(QMainWindow):
         if not port:
             return
         path, _ = QFileDialog.getSaveFileName(self, "Sauvegarde complète (4 Mo)",
-                                              os.path.join(self.backup_dir(), "RT4D-flash-complete.bin"),
+                                              os.path.join(self.backup_dir(), "RT4D-flash-complete-"
+                                                           f"{datetime.datetime.now():%Y-%m-%d}.bin"),
                                               "Image binaire (*.bin)")
         if not path:
             return
@@ -1013,6 +1028,12 @@ class MainWindow(QMainWindow):
                                radio_ops.backup_spi, port, path)
         if ok:
             QMessageBox.information(self, "Sauvegarde", f"Sauvegarde complète enregistrée :\n{path}")
+            if os.path.normcase(os.path.abspath(path)).startswith(
+                    os.path.normcase(os.path.abspath(self.backup_dir())) + os.sep):
+                self.backup.after_backup()
+            elif self.backup.configured():
+                self.log("Sauvegarde Nextcloud : ce fichier n'est pas dans le dossier des sauvegardes, "
+                         "il ne sera pas envoyé.")
 
     def restore_full(self):
         port = self.port_name()
@@ -1088,6 +1109,7 @@ class MainWindow(QMainWindow):
         if ok:
             QMessageBox.information(self, "Police", "Police écrite et vérifiée.\n\nÉteignez puis "
                                     f"rallumez la radio.\n\nAncienne police enregistrée :\n{res}")
+            self.backup.after_backup()
 
     def flash_fw(self):
         dlg = FirmwareDialog(self, self.port.currentData(), self.settings.value("fw_dir", self.last_dir()))
@@ -1196,6 +1218,21 @@ class MainWindow(QMainWindow):
         self.dirty = False
         self.log("Mise à jour : redémarrage de RT4D Programmer…")
         QApplication.quit()
+
+    # -- sauvegarde Nextcloud --
+    def backup_dialog(self):
+        from .backup import BackupDialog
+        BackupDialog(self).exec()
+
+    def open_backup_dir(self):
+        d = self.backup_dir()
+        os.makedirs(d, exist_ok=True)
+        QDesktopServices.openUrl(QUrl.fromLocalFile(d))
+
+    def on_backup_status(self, msg: str):
+        self.statusBar().showMessage(msg, 15000)
+        if not msg.endswith("…"):
+            self.log(msg)
 
     def show_help(self):
         box = QMessageBox(self)
