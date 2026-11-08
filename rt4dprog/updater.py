@@ -8,6 +8,7 @@ import os
 import ssl
 import subprocess
 import sys
+import time
 import urllib.request
 import zipfile
 from dataclasses import dataclass
@@ -29,6 +30,7 @@ class Release:
     asset_url: Optional[str]
     asset_size: int
     page: str
+    api_asset_url: Optional[str] = None
 
 
 def _ctx():
@@ -75,12 +77,33 @@ def check_latest(timeout: float = 10) -> Optional[Release]:
     tag = data.get("tag_name", "")
     if not tag or not is_newer(tag):
         return None
-    url, size = None, 0
+    url, size, api_url = None, 0, None
     for a in data.get("assets", []):
         if a.get("name") == asset_name():
             url, size = a.get("browser_download_url"), int(a.get("size") or 0)
+            api_url = a.get("url")
     return Release(version=tag.lstrip("vV"), notes=data.get("body") or "", asset_url=url,
-                   asset_size=size, page=data.get("html_url") or RELEASES_PAGE)
+                   asset_size=size, page=data.get("html_url") or RELEASES_PAGE,
+                   api_asset_url=api_url)
+
+
+def _download(url: str, headers: dict, expected: int, progress: Progress, cancel: CancelCheck) -> bytes:
+    req = urllib.request.Request(url, headers=headers)
+    buf = bytearray()
+    with urllib.request.urlopen(req, context=_ctx(), timeout=90) as r:
+        total = int(r.headers.get("Content-Length") or expected or 0)
+        while True:
+            if cancel and cancel():
+                raise Cancelled("Mise à jour annulée.")
+            chunk = r.read(256 * 1024)
+            if not chunk:
+                break
+            buf.extend(chunk)
+            if progress:
+                progress(len(buf) // 1024, max(total // 1024, len(buf) // 1024), "Téléchargement (Ko)")
+    if expected and len(buf) != expected:
+        raise IOError(f"fichier incomplet ({len(buf)} / {expected} octets)")
+    return bytes(buf)
 
 
 def download_and_install(rel: Release, progress: Progress = None, cancel: CancelCheck = None,
@@ -92,26 +115,30 @@ def download_and_install(rel: Release, progress: Progress = None, cancel: Cancel
         raise RadioError("Impossible de remplacer le programme dans son dossier actuel "
                          "(droits insuffisants).")
     log(f"Téléchargement de la version {rel.version}…")
-    req = urllib.request.Request(rel.asset_url, headers={"User-Agent": UA["User-Agent"]})
-    buf = bytearray()
-    try:
-        with urllib.request.urlopen(req, context=_ctx(), timeout=60) as r:
-            total = int(r.headers.get("Content-Length") or rel.asset_size or 0)
-            while True:
+    sources = [(rel.asset_url, {"User-Agent": UA["User-Agent"]})]
+    if rel.api_asset_url:
+        sources.append((rel.api_asset_url, {"User-Agent": UA["User-Agent"],
+                                            "Accept": "application/octet-stream"}))
+    buf = None
+    last = None
+    for attempt in range(4):
+        url, headers = sources[attempt % len(sources)]
+        try:
+            buf = _download(url, headers, rel.asset_size, progress, cancel)
+            break
+        except Cancelled:
+            raise
+        except Exception as e:
+            last = e
+            wait = 3 * (attempt + 1)
+            log(f"Essai {attempt + 1} échoué ({e}). Nouvel essai dans {wait} s…")
+            for _ in range(wait * 10):
                 if cancel and cancel():
                     raise Cancelled("Mise à jour annulée.")
-                chunk = r.read(256 * 1024)
-                if not chunk:
-                    break
-                buf.extend(chunk)
-                if progress:
-                    progress(len(buf) // 1024, max(total // 1024, len(buf) // 1024), "Téléchargement (Ko)")
-    except (Cancelled, RadioError):
-        raise
-    except Exception as e:
-        raise RadioError(f"Téléchargement impossible : {e}") from e
-    if rel.asset_size and len(buf) != rel.asset_size:
-        raise RadioError("Le fichier téléchargé est incomplet. Réessayez.")
+                time.sleep(0.1)
+    if buf is None:
+        raise RadioError(f"Téléchargement impossible après plusieurs essais : {last}\n\n"
+                         f"Réessayez plus tard, ou téléchargez la version à la main :\n{rel.page}")
     try:
         with zipfile.ZipFile(io.BytesIO(bytes(buf))) as z:
             member = next((n for n in z.namelist() if os.path.basename(n) == exe_name()), None)

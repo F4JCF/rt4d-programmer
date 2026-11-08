@@ -480,3 +480,29 @@ REAL_UPG = ("/home/claude/fw_in/RT-4D 20260205 Upgrade/RT-4D 20260205 Upgrade/"
 def test_real_radtel_package():
     fw = FW.load_firmware(REAL_UPG)
     assert fw.official and fw.used_bytes == 155740 and "V3.25" in fw.label
+
+
+def test_update_download_retries(monkeypatch, tmp_path):
+    import io as _io
+    calls = []
+    zbuf = _io.BytesIO()
+    with zipfile.ZipFile(zbuf, "w") as zf:
+        zf.writestr("RT4D-Programmer", b"\x7fELF nouvelle version")
+    payload = zbuf.getvalue()
+
+    def fake(url, headers, expected, progress, cancel):
+        calls.append(url)
+        if len(calls) < 3:
+            raise IOError("HTTP Error 504: Gateway Time-out")
+        return payload
+    monkeypatch.setattr(updater, "_download", fake)
+    monkeypatch.setattr(updater.time, "sleep", lambda s: None)
+    monkeypatch.setattr(updater, "can_self_update", lambda: True)
+    target = tmp_path / "RT4D-Programmer"
+    target.write_bytes(b"\x7fELF ancienne")
+    monkeypatch.setattr(updater.sys, "executable", str(target))
+    monkeypatch.setattr(updater.sys, "platform", "linux")
+    rel = updater.Release("9.9.9", "", "https://a", 0, "https://p", "https://api")
+    updater.download_and_install(rel, log=lambda m: None)
+    assert calls == ["https://a", "https://api", "https://a"]
+    assert target.read_bytes() == b"\x7fELF nouvelle version"

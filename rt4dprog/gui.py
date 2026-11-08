@@ -909,8 +909,14 @@ class MainWindow(QMainWindow):
 
         def job(progress=None, cancel=None, log=None):
             return updater.download_and_install(rel, progress, cancel, log)
-        ok, path = TaskDialog.run(self, f"Mise à jour vers la version {rel.version}", job)
+        dlg = TaskDialog(self, f"Mise à jour vers la version {rel.version}", job)
+        dlg.exec()
+        ok, path = dlg.ok, dlg.result_value
         if not ok:
+            if QMessageBox.question(self, "Mise à jour",
+                                    f"{path}\n\nOuvrir la page de téléchargement dans le "
+                                    "navigateur ?") == QMessageBox.Yes:
+                QDesktopServices.openUrl(QUrl(rel.page))
             return
         try:
             updater.restart(path)
