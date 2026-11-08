@@ -59,6 +59,34 @@ ZN_SIZE, ZN_MAX, ZN_CH_MAX = 520, 250, 250
 CT_SIZE, CT_MAX = 21, 10000
 GL_SIZE, GL_MAX, GL_IDS = 80, 250, 32
 
+# Touches programmables (bloc VFO, réglages n°2 à 0x1C060) — d'après le CPS officiel
+A_CFG2 = A_VFO + 0x60
+KEY_SLOTS = [                       # (décalage dans A_CFG2, libellé)
+    (31, "Touche latérale 1 — appui court"),
+    (32, "Touche latérale 1 — appui long"),
+    (33, "Touche latérale 2 — appui court"),
+    (34, "Touche latérale 2 — appui long"),
+    (35, "Touche alarme — appui court"),
+    (36, "Touche alarme — appui long"),
+] + [(37 + i, f"Touche {i} — appui long") for i in range(10)]
+
+KEY_FUNCTIONS = [
+    "Aucune fonction", "Écoute analogique (monitor)", "Puissance haute/basse",
+    "Double veille", "Priorité émission", "Balayage (scan)", "Rétroéclairage marche/arrêt",
+    "Bip de fin d'émission (analogique)", "Radio FM", "Talkaround (sans relais)",
+    "Alarme d'urgence", "Mesure de fréquence", "Décodage sous-ton à distance",
+    "Envoi d'un ton (tone)", "Interrogation d'état", "Écoute à distance",
+    "DMR : neutralisation à distance (stun)", "DMR : destruction à distance (kill)",
+    "DMR : réactivation à distance", "Détection en ligne", "Affichage de l'appelé",
+    "Bascule AM/FM (réception)", "Spectre analogique", "Niveau de squelch",
+    "Pas de fréquence", "Bascule analogique/DMR", "Canal météo NOAA",
+    "Enregistrer le canal", "Nouveau SMS", "Menu SMS", "Luminosité de l'écran",
+    "VOX analogique", "Choix de la zone", "Mode promiscuité (DMR)",
+    "Double slot marche/arrêt", "Changement de slot", "Changement de code couleur",
+    "Chiffrement DMR marche/arrêt", "Choix du groupe RX", "Aller aux contacts",
+    "Choix DTMF",
+]
+
 CONNECT = bytes([0x34, 0x52, 0x05, 0x10, 0x9B])
 END = bytes([0x34, 0x52, 0x05, 0xEE, 0x79])
 ALL_CALL = bytes([0x02, 0xAA, 0xAA, 0xAA, 0xAA])
@@ -81,7 +109,8 @@ class StockCodeplug:
     kind = "stock"
     is_refw = False
     LIMITS = dict(channels=CH_MAX, contacts=CT_MAX, groups=GL_MAX, group_ids=GL_IDS,
-                  zones=ZN_MAX, zone_channels=ZN_CH_MAX, zone_scan=False, contact0_fixed=True)
+                  zones=ZN_MAX, zone_channels=ZN_CH_MAX, zone_scan=False, contact0_fixed=True,
+                  keys=True)
 
     def __init__(self, image: bytes):
         if len(image) >= IMAGE_SIZE:
@@ -140,6 +169,7 @@ class StockCodeplug:
                 cur = (struct.unpack_from("<H", r, 0)[0], struct.unpack_from("<H", r, 2)[0])
                 self.zones[i] = Zone(name=name or zone_default_name(i), channels=chans,
                                      scan=[True] * len(chans), cur=cur)
+        self.keys = [img[A_CFG2 + off] for off, _ in KEY_SLOTS]
         cfg = img[A_CFG:A_CFG + 0x400]
         self.settings = Settings(radio_id=bcd_decode(cfg[384:388]),
                                  radio_name=get_name(cfg, 76, 16),
@@ -206,6 +236,10 @@ class StockCodeplug:
             for k, v in enumerate(chans):
                 struct.pack_into("<H", r, 20 + 2 * k, v)
             img[A_ZONE + i * ZN_SIZE:A_ZONE + (i + 1) * ZN_SIZE] = r
+
+        # touches programmables
+        for (off, _), val in zip(KEY_SLOTS, self.keys):
+            img[A_CFG2 + off] = val & 0xFF
 
         # réglages (seuls les champs gérés sont modifiés)
         s = self.settings

@@ -425,3 +425,13 @@ def test_install_binary(tmp_path):
     updater.install_binary(b"\x7fELF nouvelle", str(exe), log=lambda m: None)
     assert exe.read_bytes() == b"\x7fELF nouvelle" and os.access(exe, os.X_OK)
     assert not (tmp_path / "RT4D-Programmer.nouveau").exists()
+
+
+def test_stock_keys(stock_radio, tmp_path):
+    cp = radio_ops.read_codeplug("X", log=lambda m: None)
+    assert len(cp.keys) == 16
+    cp.keys[0] = 5          # touche latérale 1 courte = balayage
+    cp.keys[15] = 8         # touche 9 longue = radio FM
+    radio_ops.write_codeplug("X", cp, [], str(tmp_path), log=lambda m: None)
+    assert stock_radio.spi[0x1C060 + 31] == 5 and stock_radio.spi[0x1C060 + 46] == 8
+    assert radio_ops.read_codeplug("X", log=lambda m: None).keys[0] == 5

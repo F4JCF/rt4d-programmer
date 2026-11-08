@@ -20,7 +20,7 @@ from . import layout as L
 from . import addressbook as AB
 from . import protocol, radio_ops, updater
 from .codeplug import Codeplug
-from .gui_tabs import ChannelsTab, ContactsTab, GroupsTab, SettingsTab, ZonesTab
+from .gui_tabs import ChannelsTab, ContactsTab, GroupsTab, KeysTab, SettingsTab, ZonesTab
 from .protocol import Cancelled, RadioError
 
 HELP = """
@@ -470,10 +470,12 @@ class MainWindow(QMainWindow):
         self.t_gl = GroupsTab()
         self.t_zn = ZonesTab()
         self.t_st = SettingsTab()
+        self.t_keys = KeysTab()
         self.logbox = QPlainTextEdit(readOnly=True)
         self.logbox.setFont(QFont("Monospace", 9))
         for t, name in ((self.t_ch, "Canaux"), (self.t_ct, "Contacts"), (self.t_gl, "Groupes RX"),
-                        (self.t_zn, "Zones"), (self.t_st, "Réglages")):
+                        (self.t_zn, "Zones"), (self.t_st, "Réglages"),
+                        (self.t_keys, "Réglages touches")):
             self.tabs.addTab(t, name)
             t.changed.connect(self.mark_dirty)
         self.tabs.addTab(self.logbox, "Journal")
@@ -615,7 +617,7 @@ class MainWindow(QMainWindow):
         self.cp = cp
         self.path = path
         self.dirty = False
-        for t in (self.t_ch, self.t_ct, self.t_gl, self.t_zn, self.t_st):
+        for t in (self.t_ch, self.t_ct, self.t_gl, self.t_zn, self.t_st, self.t_keys):
             t.set_codeplug(cp)
         self.update_banner()
         self.update_title()

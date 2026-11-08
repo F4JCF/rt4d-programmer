@@ -283,7 +283,8 @@ class Codeplug:
     """Codeplug au format REFW (fichier .4rdmf)."""
     kind = "refw"
     LIMITS = dict(channels=L.CH_MAX, contacts=L.CT_MAX, groups=L.GL_MAX, group_ids=L.GL_IDS,
-                  zones=L.ZN_MAX, zone_channels=L.ZN_CH_MAX, zone_scan=True, contact0_fixed=False)
+                  zones=L.ZN_MAX, zone_channels=L.ZN_CH_MAX, zone_scan=True, contact0_fixed=False,
+                  keys=False)
 
     def __init__(self, image: bytes | None = None):
         if image is None:

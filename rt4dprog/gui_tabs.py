@@ -823,3 +823,72 @@ class SettingsTab(BaseTab):
         if new != (s.radio_id, s.radio_name, s.startup_message):
             s.radio_id, s.radio_name, s.startup_message = new
             self.changed.emit()
+
+
+# ───────────────────────────── Touches ─────────────────────────────
+
+class KeysTab(BaseTab):
+    """Fonctions des touches programmables (firmware officiel Radtel)."""
+
+    def __init__(self):
+        super().__init__()
+        from . import stock as S
+        self.S = S
+        root = QVBoxLayout(self)
+        self.info = QLabel()
+        self.info.setWordWrap(True)
+        root.addWidget(self.info)
+        self.box = QGroupBox("Fonction de chaque touche")
+        f = QFormLayout(self.box)
+        self.combos = []
+        for _, label in S.KEY_SLOTS:
+            cb = QComboBox()
+            cb.addItems(S.KEY_FUNCTIONS)
+            cb.setMaxVisibleItems(20)
+            cb.currentIndexChanged.connect(self.save)
+            f.addRow(label, cb)
+            self.combos.append(cb)
+        root.addWidget(self.box)
+        row = QHBoxLayout()
+        b = QPushButton("Tout remettre à « Aucune fonction »")
+        b.clicked.connect(self.reset_all)
+        row.addWidget(b)
+        row.addStretch()
+        root.addLayout(row)
+        root.addStretch()
+
+    def refresh(self):
+        if not self.cp:
+            return
+        ok = self.cp.LIMITS.get("keys", False)
+        self.box.setEnabled(ok)
+        if not ok:
+            self.info.setText("Le réglage des touches n'est disponible qu'avec le firmware officiel "
+                              "Radtel (V3.18 ou plus récent).")
+            return
+        self.info.setText("Choisissez l'action de chaque touche, puis écrivez dans la radio. "
+                          "« Appui long » sur les touches 0 à 9 = raccourcis du clavier.")
+        with _Block(self.combos):
+            for cb, val in zip(self.combos, self.cp.keys):
+                if val >= len(self.S.KEY_FUNCTIONS):
+                    if cb.count() == len(self.S.KEY_FUNCTIONS):
+                        cb.addItem(f"Valeur inconnue ({val})")
+                    cb.setCurrentIndex(cb.count() - 1)
+                else:
+                    cb.setCurrentIndex(val)
+
+    def save(self, *_):
+        if not self.cp or not self.cp.LIMITS.get("keys", False):
+            return
+        changed = False
+        for i, cb in enumerate(self.combos):
+            idx = cb.currentIndex()
+            if idx < len(self.S.KEY_FUNCTIONS) and self.cp.keys[i] != idx:
+                self.cp.keys[i] = idx
+                changed = True
+        if changed:
+            self.changed.emit()
+
+    def reset_all(self):
+        for cb in self.combos:
+            cb.setCurrentIndex(0)
