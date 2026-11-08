@@ -41,6 +41,12 @@ jobs:
           python-version: "3.12"
       - name: Dépendances
         run: pip install -r requirements.txt pyinstaller
+      - name: Bibliothèques Linux embarquées (xcb-cursor, absente de Linux Mint)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libxcb-cursor0
+          echo "EXTRA_BIN=--add-binary /usr/lib/x86_64-linux-gnu/libxcb-cursor.so.0:." >> "$GITHUB_ENV"
       - name: Compilation PyInstaller
         shell: bash
         run: >
@@ -48,9 +54,21 @@ jobs:
           --name RT4D-Programmer
           --icon icon.ico
           --add-data "icon.png:."
+          $EXTRA_BIN
           --collect-submodules serial.tools
           --collect-data certifi
           main.py
+      - name: Test de démarrage Linux (sans libxcb-cursor0 installée, comme sur Linux Mint)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get install -y -qq xvfb
+          sudo apt-get remove -y -qq libxcb-cursor0
+          set +e
+          HOME=$(mktemp -d) timeout 15 xvfb-run -a dist/RT4D-Programmer > start.log 2>&1
+          code=$?
+          cat start.log
+          # 124 = toujours en marche au bout de 15 s : l'interface a démarré
+          [ "$code" = "124" ] || { echo "Le logiciel ne démarre pas (code $code)"; exit 1; }
       - name: Installateur Windows (Inno Setup)
         if: runner.os == 'Windows'
         shell: pwsh
