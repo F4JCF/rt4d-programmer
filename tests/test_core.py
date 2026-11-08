@@ -789,3 +789,22 @@ def test_linux_desktop_entry(tmp_path, monkeypatch):
     assert 'Exec="/opt/rt4d/RT4D-Programmer"' in txt
     assert (tmp_path / "icons/hicolor/256x256/apps/rt4d-programmer.png").exists()
     assert LD.install("/home/x/RT4D-Programmer") is True           # exécutable déplacé
+
+
+def test_accent_names():
+    from rt4dprog import codeplug as C
+    buf = bytearray(b"\xFF" * 16)
+    try:
+        C.ACCENTS = False
+        C.put_name(buf, 0, "Détresse Aéro", 16)
+        assert C.get_name(buf, 0, 16) == "Detresse Aero"
+        C.ACCENTS = True
+        buf = bytearray(b"\xFF" * 16)
+        C.put_name(buf, 0, "Détresse Aéro", 16)
+        assert bytes(buf[:13]) == b"D`tresse A`ro"
+        assert C.get_name(buf, 0, 16) == "Détresse Aéro"
+        buf = bytearray(b"\xFF" * 16)
+        C.put_name(buf, 0, "Rôle {x} Ç", 16)         # ô → o ; { réservé → _ ; Ç sans glyphe → C
+        assert bytes(buf[:10]) == b"Role _x_ C"
+    finally:
+        C.ACCENTS = False

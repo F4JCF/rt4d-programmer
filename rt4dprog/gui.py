@@ -709,6 +709,13 @@ class MainWindow(QMainWindow):
         self._act(m, "Restaurer une sauvegarde complète…", self.restore_full)
         m.addSeparator()
         self._act(m, "Police avec accents (é è ê à ç î É)…", self.font_accents)
+        self.act_accents = QAction("Accents dans les noms (police avec accents installée)", self,
+                                   checkable=True)
+        self.act_accents.setChecked(self.settings.value("accent_names", False, type=bool))
+        from . import codeplug as C
+        C.ACCENTS = self.act_accents.isChecked()
+        self.act_accents.toggled.connect(self.toggle_accents)
+        m.addAction(self.act_accents)
 
         m = self.menuBar().addMenu("F&irmware")
         self._act(m, "Flasher un firmware (mise à jour / retour arrière)…", self.flash_fw)
@@ -1057,6 +1064,17 @@ class MainWindow(QMainWindow):
                                dlg.calib.isChecked())
         if ok:
             QMessageBox.information(self, "Restauration", "Restauration terminée. Redémarrez la radio.")
+
+    def toggle_accents(self, on: bool):
+        from . import codeplug as C
+        self.settings.setValue("accent_names", on)
+        C.ACCENTS = on
+        QMessageBox.information(
+            self, "Accents dans les noms",
+            ("Les noms pourront contenir é è ê à ç î É. Ils ne s'afficheront correctement dans la radio "
+             "que si la police avec accents y est installée (Radio → Police avec accents).\n\n"
+             "Relisez la radio pour voir les accents des noms déjà enregistrés." if on else
+             "Les accents seront retirés des noms écrits dans la radio."))
 
     def font_accents(self):
         port = self.port_name()

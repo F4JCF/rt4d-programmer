@@ -22,9 +22,20 @@ RX_TX = ["RX+TX", "RX seul", "TX seul"]
 
 # ───────────────────────────── utilitaires ─────────────────────────────
 
+# Option « accents dans les noms » (firmware officiel avec la police avec accents installée) :
+# é è ê à ç î É sont écrits avec les 7 caractères redessinés par fontpatch (` { ^ } | ~ \).
+ACCENTS = False
+
+
 def to_ascii(text: str, maxlen: int) -> bytes:
-    """Nom → octets (accents retirés, tronqué)."""
-    t = unicodedata.normalize("NFKD", text or "")
+    """Nom → octets (accents retirés, tronqué). Avec ACCENTS, é è ê à ç î É sont conservés
+    sous la forme des caractères de la police avec accents."""
+    text = text or ""
+    if ACCENTS:
+        from .fontpatch import MAP, TO_RADIO
+        text = "".join("_" if c in MAP else c for c in text)     # ` { ^ } | ~ \ réservés aux accents
+        text = "".join(TO_RADIO.get(c, c) for c in text)
+    t = unicodedata.normalize("NFKD", text)
     t = "".join(c for c in t if not unicodedata.combining(c))
     t = "".join(c if 32 <= ord(c) < 127 else "_" for c in t)
     return t.encode("ascii")[:maxlen]
@@ -39,7 +50,11 @@ def put_name(buf: bytearray, off: int, text: str, length: int):
 
 def get_name(buf: bytes, off: int, length: int) -> str:
     raw = bytes(c for c in buf[off:off + length] if c not in (0xFF, 0x00))
-    return raw.decode("gbk", "replace").strip()
+    text = raw.decode("gbk", "replace").strip()
+    if ACCENTS:
+        from .fontpatch import MAP
+        text = "".join(MAP[c][0] if c in MAP else c for c in text)
+    return text
 
 
 def bcd_decode(b: bytes) -> int:
