@@ -33,6 +33,7 @@ class FakeRadio:
         self.erased = False
         self.closed_sessions = 0
         self.writes = []            # (region, block)
+        self.addressbook = bytearray()
 
     # interface type pyserial
     timeout = 0.1
@@ -106,6 +107,16 @@ class FakeRadio:
                     self.closed_sessions += 1
                 else:
                     self.out.append(0x06)
+            elif b0 == 0xA4:
+                if len(self.inbuf) < 1028:
+                    return
+                cmd = self.inbuf[:1028]
+                del self.inbuf[:1028]
+                assert cmd[-1] == _sum(cmd[:-1])
+                blk = (cmd[1] << 8) | cmd[2]
+                assert blk * 1024 == len(self.addressbook), "blocs dans l'ordre"
+                self.addressbook.extend(cmd[3:1027])
+                self.out.append(0x06)
             elif b0 in self.region_addr:
                 if len(self.inbuf) < 1028:
                     return

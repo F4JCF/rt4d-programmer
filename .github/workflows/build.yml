@@ -49,6 +49,7 @@ jobs:
           --icon icon.ico
           --add-data "icon.png:."
           --collect-submodules serial.tools
+          --collect-data certifi
           main.py
       - name: Paquet
         shell: bash

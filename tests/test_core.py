@@ -373,3 +373,37 @@ def test_real_backup_roundtrip():
     cp = S.StockCodeplug(data)
     assert len(cp.channels) == 460 and len(cp.zones) == 11
     assert cp.build() == data[:S.IMAGE_SIZE]
+
+
+# ───────────────────────── carnet d'adresses ─────────────────────────
+
+from rt4dprog import addressbook as AB
+
+RADIOID_SAMPLE = """RADIO_ID,CALLSIGN,FIRST_NAME,LAST_NAME,CITY,STATE,COUNTRY
+2080845,F4JCF,Jean-Marie,Bouthors,Mougins,Provence-Alpes-Côte d'Azur,France
+2220001,IZ1ABC,Mario,Rossi,"Sanremo, IM",Liguria,Italy
+abc,BAD,x,y,z,w,France
+2080001,F1ABC,Élodie,,Nice,PACA,France
+"""
+
+
+def test_addressbook_parse_and_payload(stock_radio):
+    entries = AB.parse_csv_text(RADIOID_SAMPLE)
+    assert len(entries) == 3
+    assert entries[0].name == "Jean-Marie Bouthors" and entries[0].state == "Provence-Alpes-Cote d'Azur"
+    assert entries[1].city == "Sanremo IM"
+    assert dict(AB.countries(entries))["France"] == 2
+    fr = [e for e in entries if e.country == "France"]
+    payload = AB.build_payload(fr)
+    body = b"2080001,F1ABC,Elodie,Nice,PACA,France\n2080845,F4JCF,Jean-Marie Bouthors,Mougins,Provence-Alpes-Cote d'Azur,France\n"
+    assert payload == (len(body) + 4).to_bytes(4, "big") + body
+    AB.write_addressbook("X", payload, log=lambda m: None)
+    assert bytes(stock_radio.addressbook[:len(payload)]) == payload
+    assert set(stock_radio.addressbook[len(payload):]) == {0xFF}
+    assert stock_radio.closed_sessions == 1
+
+
+def test_addressbook_radtel_format():
+    txt = "No,Radio ID,Callsign,Name,City,State,Country,Remarks\n1,2080845,F4JCF,Jean Marie,Mougins,PACA,France,\n"
+    e = AB.parse_csv_text(txt)
+    assert e[0].dmr_id == 2080845 and e[0].name == "Jean Marie"
