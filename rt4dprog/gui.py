@@ -160,7 +160,7 @@ class WriteDialog(QDialog):
         self.setWindowTitle("Écrire dans la radio")
         v = QVBoxLayout(self)
         self.checks = {}
-        if getattr(cp, "kind", "refw") == "stock":
+        if getattr(cp, "kind", "refw") in ("stock", "legacy"):
             lab = QLabel("Firmware officiel Radtel : comme le logiciel officiel, tout le codeplug "
                          "est écrit (réglages, canaux, zones, contacts, groupes RX…). Les parties "
                          "non gérées ici sont réécrites telles qu'elles ont été lues.")
@@ -748,10 +748,8 @@ class MainWindow(QMainWindow):
             txt, col = ("Firmware officiel Radtel (V3.18 ou plus récent) : lecture et écriture "
                         "disponibles."), "#1e7e34"
         elif getattr(cp, "kind", "refw") == "legacy":
-            txt, col = ("Ancien firmware officiel Radtel (V3.17 ou plus ancien) : LECTURE SEULE. "
-                        "Pour modifier la radio : enregistrez ce codeplug, mettez à jour le "
-                        "firmware (menu Firmware), lisez la radio, puis Fichier > Importer un "
-                        "codeplug d'ancien firmware."), "#c0392b"
+            txt, col = ("Ancien firmware officiel Radtel (V3.17 ou plus ancien) : lecture et "
+                        "écriture disponibles, comme avec le logiciel Radtel CPS V1.19."), "#1e7e34"
         elif not cp.has_settings:
             txt, col = ("Codeplug sans réglages radio : vous pouvez préparer canaux, contacts et "
                         "zones, puis les écrire (les réglages de la radio seront conservés)."), "#2c3e50"
@@ -944,18 +942,13 @@ class MainWindow(QMainWindow):
             self.update_title()
             self.log(f"Lecture terminée : {len(cp.channels)} canaux, {len(cp.contacts)} contacts, "
                      f"{len(cp.groups)} groupes RX, {len(cp.zones)} zones.")
-            if getattr(cp, "kind", "refw") == "legacy":
-                QMessageBox.information(self, "Ancien firmware Radtel", radio_ops.LEGACY_WRITE_MSG)
-            elif getattr(cp, "kind", "refw") == "refw" and not cp.is_refw:
+            if getattr(cp, "kind", "refw") == "refw" and not cp.is_refw:
                 QMessageBox.warning(self, "Format non reconnu",
                                     "Le format de cette radio n'est pas reconnu (firmware ancien ?). "
                                     "Les données affichées peuvent être fausses et l'écriture est "
                                     "bloquée.\n\nPensez à enregistrer ce fichier comme sauvegarde.")
 
     def write_radio(self):
-        if getattr(self.cp, "kind", "refw") == "legacy":
-            QMessageBox.information(self, "Ancien firmware Radtel", radio_ops.LEGACY_WRITE_MSG)
-            return
         port = self.port_name()
         if not port:
             return

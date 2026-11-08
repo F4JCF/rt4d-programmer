@@ -822,7 +822,7 @@ class SettingsTab(BaseTab):
             self.e_id.setValue(s.radio_id)
             self.e_name.setText(s.radio_name)
             self.e_msg.setText(s.startup_message)
-        ok = self.cp.has_settings and (self.cp.is_refw or self.cp.kind == "stock") and not self.ro
+        ok = self.cp.has_settings and (self.cp.is_refw or self.cp.kind in ("stock", "legacy")) and not self.ro
         # firmware officiel : le message d'accueil se règle dans « Menu démarrage »
         stock = self.cp.kind == "stock"
         self.msg_label.setVisible(not stock)

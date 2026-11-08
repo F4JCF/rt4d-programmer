@@ -12,6 +12,8 @@ from rt4dprog import stock as S
 REGION_ADDR = {r: a for r, a, _, _ in L.SPI_RESTORE_REGIONS}
 REGION_ADDR[0x80] = 0x0C7000
 STOCK_REGION_ADDR = {r: a for r, a, _, _ in S.WRITE_REGIONS}
+from rt4dprog import legacy as O  # noqa: E402
+LEGACY_REGION_ADDR = {r: a for r, a, _, _ in O.WRITE_REGIONS}
 
 
 def _sum(data, base=0):
@@ -22,9 +24,11 @@ def _sum(data, base=0):
 
 
 class FakeRadio:
-    def __init__(self, spi: bytes | None = None, bootloader: bool = False, stock: bool = False):
-        self.region_addr = STOCK_REGION_ADDR if stock else REGION_ADDR
-        self.stock = stock
+    def __init__(self, spi: bytes | None = None, bootloader: bool = False, stock: bool = False,
+                 legacy: bool = False):
+        self.region_addr = (LEGACY_REGION_ADDR if legacy else
+                            STOCK_REGION_ADDR if stock else REGION_ADDR)
+        self.stock = stock or legacy
         self.spi = bytearray(spi if spi else b"\xFF" * (4096 * 1024))
         self.bootloader = bootloader
         self.inbuf = bytearray()

@@ -15,14 +15,6 @@ from .protocol import (BLOCK, SPI_SIZE_KB, CancelCheck, Cancelled, NormalLink, P
 
 Log = Callable[[str], None]
 
-LEGACY_WRITE_MSG = (
-    "Ce codeplug vient d'un ANCIEN firmware Radtel (V3.17 ou plus ancien) : l'écriture "
-    "directe n'est pas disponible.\n\nPour modifier cette radio :\n"
-    "1. Enregistrez ce codeplug (Fichier > Enregistrer sous…).\n"
-    "2. Mettez à jour le firmware de la radio (menu Firmware).\n"
-    "3. Lisez la radio (Radio > Lire la radio).\n"
-    "4. Fichier > Importer un codeplug d'ancien firmware… et choisissez le fichier enregistré.\n"
-    "5. Vérifiez puis écrivez dans la radio.")
 
 
 class BlockCache:
@@ -79,7 +71,7 @@ def _detect_format(rd: "BlockCache") -> tuple[str, int]:
 
 
 def _connect(link: NormalLink, fmt: str, log: Log):
-    if fmt == "stock":
+    if fmt in ("stock", "legacy"):
         for _ in range(3):
             link.ser.write(S.CONNECT)
             r = link._read_exact(1)
@@ -104,7 +96,7 @@ def _read_stock(rd: "BlockCache", progress: Progress, log: Log) -> "S.StockCodep
 def _read_legacy(rd: "BlockCache", progress: Progress, log: Log) -> "O.LegacyCodeplug":
     image = bytearray(b"\xFF" * O.IMAGE_SIZE)
     blocks = [a // BLOCK + k for a, n in O.READ_RANGES for k in range(n)]
-    log("Lecture du codeplug (ancien firmware officiel Radtel, lecture seule)…")
+    log("Lecture du codeplug (ancien firmware officiel Radtel)…")
     for i, kb in enumerate(blocks):
         image[kb * BLOCK:(kb + 1) * BLOCK] = rd.read(kb * BLOCK, BLOCK)
         if progress:
@@ -154,8 +146,7 @@ def _read_all(link: NormalLink, progress: Progress, cancel: CancelCheck, log: Lo
     fmt, bank = _detect_format(rd)
     log({"refw": "Firmware REFW (beta 41 ou plus) détecté.",
          "stock": "Firmware officiel Radtel (V3.18 ou plus récent) détecté.",
-         "legacy": "Ancien firmware officiel Radtel (V3.17 ou plus ancien) détecté : "
-                   "lecture seule.",
+         "legacy": "Ancien firmware officiel Radtel (V3.17 ou plus ancien) détecté.",
          "inconnu": "Format NON reconnu (firmware officiel ancien ou REFW ancien) : "
                     "lecture seule."}[fmt])
     if not connected:
@@ -205,8 +196,7 @@ def identify(port: str, log: Log = print) -> str:
                     "récent). Lecture et écriture disponibles.")
         if fmt == "legacy":
             return ("Radio détectée en mode normal — ANCIEN firmware officiel Radtel (V3.17 ou "
-                    "plus ancien). Lecture disponible ; pour modifier la radio, mettez à jour "
-                    "son firmware puis importez l'ancien codeplug (menu Fichier).")
+                    "plus ancien). Lecture et écriture disponibles.")
         return ("Radio détectée en mode normal — format non reconnu (firmware ancien ?). "
                 "Lecture et sauvegarde complète possibles, écriture du codeplug bloquée.")
     finally:
@@ -231,7 +221,7 @@ def write_codeplug(port: str, cp: Codeplug, sections: list[str], backup_dir: str
     Retourne le chemin du fichier de sauvegarde créé.
     """
     if getattr(cp, "kind", "refw") == "legacy":
-        raise RadioError(LEGACY_WRITE_MSG)
+        return _write_legacy(port, cp, backup_dir, progress, cancel, log)
     if getattr(cp, "kind", "refw") == "stock":
         return _write_stock(port, cp, backup_dir, progress, cancel, log)
     for s in sections:
@@ -403,6 +393,61 @@ def _write_stock(port: str, cp: "S.StockCodeplug", backup_dir: str, progress: Pr
                 progress(done[0] + i, total, label)
 
         for region, addr, nblocks, label in S.WRITE_REGIONS:
+            log(f"Écriture : {label}…")
+            link.write_region(region, bytes(data[addr:addr + nblocks * BLOCK]), prog, cancel, label)
+            done[0] += nblocks
+        link.ser.write(S.END)
+        log("Écriture terminée. La radio redémarre.")
+        return backup_path
+    finally:
+        link.close()
+
+
+def _write_legacy(port: str, cp: "O.LegacyCodeplug", backup_dir: str, progress: Progress,
+                  cancel: CancelCheck, log: Log) -> str:
+    """Écriture à l'ancien firmware officiel : même séquence que le CPS Radtel V1.19."""
+    problems = cp.validate()
+    if problems:
+        raise RadioError("Le codeplug contient des erreurs :\n• " + "\n• ".join(problems[:15]))
+    link = _open_normal(port, log)
+    try:
+        rd = BlockCache(link, cancel)
+        fmt, _ = _detect_format(rd)
+        if fmt != "legacy":
+            raise RadioError("La radio ne contient pas l'ancien firmware officiel Radtel attendu "
+                             "pour ce codeplug : écriture annulée.")
+        _connect(link, "legacy", log)
+        log("Sauvegarde du contenu actuel de la radio avant écriture…")
+        before = _read_legacy(rd, progress, log)
+        os.makedirs(backup_dir, exist_ok=True)
+        stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        backup_path = os.path.join(backup_dir, f"RT4D-avant-ecriture-{stamp}.rt4d")
+        with open(backup_path, "wb") as f:
+            f.write(bytes(before.image))
+        log(f"Sauvegarde enregistrée : {backup_path}")
+
+        # les parties non gérées ici (chiffrement, SMS, FM) sont reprises de la radio
+        data = bytearray(cp.build())
+        for region, addr, nblocks, _ in O.WRITE_REGIONS:
+            if region in (0x95, 0x97, 0x99):
+                data[addr:addr + nblocks * BLOCK] = before.image[addr:addr + nblocks * BLOCK]
+
+        # Comme le CPS : relire le bloc 8, garder le mot de passe de la radio
+        live = link.read_block(8)
+        if live is None:
+            raise RadioError("La radio a refusé la lecture des réglages.")
+        cfg = O.A_CFG
+        data[cfg:cfg + 12] = live[0:12]
+        data[cfg + 14:cfg + 16] = b"\xFF\xFF"
+
+        total = sum(n for _, _, n, _ in O.WRITE_REGIONS)
+        done = [0]
+
+        def prog(i, n, label):
+            if progress:
+                progress(done[0] + i, total, label)
+
+        for region, addr, nblocks, label in O.WRITE_REGIONS:
             log(f"Écriture : {label}…")
             link.write_region(region, bytes(data[addr:addr + nblocks * BLOCK]), prog, cancel, label)
             done[0] += nblocks

@@ -587,14 +587,14 @@ def make_legacy_spi() -> bytes:
 
 @pytest.fixture
 def legacy_radio(monkeypatch):
-    r = FakeRadio(make_legacy_spi())
+    r = FakeRadio(make_legacy_spi(), legacy=True)
     monkeypatch.setattr(protocol.NormalLink, "open", classmethod(lambda cls, port: cls(r)))
     return r
 
 
 def test_legacy_read(legacy_radio, tmp_path):
     cp = radio_ops.read_codeplug("X", log=lambda m: None)
-    assert cp.kind == "legacy" and cp.read_only
+    assert cp.kind == "legacy"
     assert cp.settings.radio_id == 2081860 and cp.settings.radio_name == "F4MGJ"
     d, a = cp.channels[0], cp.channels[1]
     assert (d.name, d.analog, d.rx, d.tx, d.timeslot, d.color_code, d.power_high) == \
@@ -605,10 +605,7 @@ def test_legacy_read(legacy_radio, tmp_path):
     assert [c.name for c in cp.contacts.values()] == ["All Call", "FRANCE TG208", "Gilbert"]
     assert cp.groups[0].contacts == [1]
     assert sorted(cp.zones) == [0, 255] and cp.zones[0].channels == [0, 1]
-    assert "radio" in radio_ops.identify("X").lower()
-    with pytest.raises(radio_ops.RadioError):
-        radio_ops.write_codeplug("X", cp, [], str(tmp_path), log=lambda m: None)
-    assert legacy_radio.writes == []
+    assert "ancien" in radio_ops.identify("X").lower()
     # fichier enregistré puis rouvert
     p = tmp_path / "old.rt4d"
     cp.save(str(p))
@@ -639,5 +636,54 @@ def test_real_legacy_dump():
     cp = radio_ops.load_any(REAL_OLD)
     assert cp.kind == "legacy"
     assert len(cp.channels) == 477 and len(cp.contacts) == 154 and len(cp.groups) == 11
-    assert len(cp.zones) == 17
+    assert len(cp.zones) == 18
     assert cp.channels[32].name == "Bertagne 83" and cp.contacts[cp.channels[32].contact].name == "VAR-Toulon"
+
+
+def test_legacy_write(legacy_radio, tmp_path):
+    cp = radio_ops.read_codeplug("X", log=lambda m: None)
+    before = bytes(legacy_radio.spi)
+    # écriture sans modification : régions identiques (sauf zones vides nommées comme le CPS)
+    radio_ops.write_codeplug("X", cp, ["all"], str(tmp_path), log=lambda m: None)
+    regions = [r for r, _ in legacy_radio.writes]
+    assert [r for i, r in enumerate(regions) if i == 0 or regions[i - 1] != r] == \
+        [0x90, 0x91, 0x92, 0x93, 0x94, 0x95, 0x97, 0x99]
+    assert len(regions) == 273
+    spi = legacy_radio.spi
+    assert spi[O.A_CH:O.A_CH + 0xC000] == before[O.A_CH:O.A_CH + 0xC000]
+    assert spi[O.A_TGLIST:O.A_TGLIST + 0x3000] == before[O.A_TGLIST:O.A_TGLIST + 0x3000]
+    assert spi[O.A_CFG:O.A_CFG + 12] == before[O.A_CFG:O.A_CFG + 12]
+    # modifications
+    legacy_radio.writes.clear()
+    cp = radio_ops.read_codeplug("X", log=lambda m: None)
+    cp.channels[5] = Channel(name="NOUVEAU", analog=True, rx=14550000, tx=14550000,
+                             rx_tone="88.5", narrow=True, power_high=False)
+    cp.channels[6] = Channel(name="DMR NEW", analog=False, rx=43000000, tx=43000000,
+                             timeslot=1, color_code=3, contact=2, group=0)
+    cp.contacts[7] = Contact(name="TG 20806", ctype=1, dmr_id=20806)
+    cp.delete_contact(1)                       # compactage : 2→1, 7→2
+    cp.zones[3] = Zone(name="Nouvelle", channels=[5, 6, 0])
+    cp.settings.radio_name = "F4MGJ-2"
+    cp.settings.radio_id = 2081861
+    radio_ops.write_codeplug("X", cp, ["all"], str(tmp_path), log=lambda m: None)
+    cp2 = radio_ops.read_codeplug("X", log=lambda m: None)
+    assert [c.name for c in cp2.contacts.values()] == ["All Call", "Gilbert", "TG 20806"]
+    assert cp2.channels[0].contact == 0          # ancien contact supprimé → All Call
+    n = cp2.channels[5]
+    assert (n.name, n.analog, n.rx, n.rx_tone, n.narrow, n.power_high) == \
+        ("NOUVEAU", True, 14550000, "88.5", True, False)
+    d = cp2.channels[6]
+    assert (d.timeslot, d.color_code, d.contact, d.group) == (1, 3, 1, 0)
+    assert cp2.zones[3].channels == [5, 6, 0]
+    assert cp2.settings.radio_name == "F4MGJ-2" and cp2.settings.radio_id == 2081861
+    assert legacy_radio.spi[O.A_CONTACT + 32 * 5] == 6           # n° de contact (base 1)
+    assert legacy_radio.spi[O.A_ZONE + 512 * 3:O.A_ZONE + 512 * 3 + 2] == bytes([3, 3])
+
+
+@pytest.mark.skipif(not os.path.exists(REAL_OLD), reason="sauvegarde V3.14 absente")
+def test_real_legacy_roundtrip():
+    with open(REAL_OLD, "rb") as f:
+        data = f.read()
+    cp = O.LegacyCodeplug(data)
+    assert cp.validate() == []
+    assert cp.build()[:0xE0000] == data[:0xE0000]
