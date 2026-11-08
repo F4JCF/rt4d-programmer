@@ -82,7 +82,7 @@ class ChannelsTab(BaseTab):
         self.table.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.verticalHeader().setVisible(False)
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
         self.table.itemSelectionChanged.connect(self.on_select)
         split.addWidget(self.table)
 
@@ -178,11 +178,16 @@ class ChannelsTab(BaseTab):
         q = self.filter.text().strip().lower()
         slots = [s for s in sorted(cp.channels) if not q or q in cp.channels[s].name.lower()]
         self.table.blockSignals(True)
+        self.table.setUpdatesEnabled(False)
+        self.table.setSortingEnabled(False)
+        self.table.setRowCount(0)
         self.table.setRowCount(len(slots))
         for r, s in enumerate(slots):
             self._fill_row(r, s)
+        self.table.resizeColumnsToContents()
+        self.table.setUpdatesEnabled(True)
         self.table.blockSignals(False)
-        self.count.setText(f"{len(cp.channels)} / {L.CH_MAX}")
+        self.count.setText(f"{len(cp.channels)} / {cp.LIMITS['channels']}")
         self._reload_refs()
         if self.current is not None and self.current in slots:
             self.table.blockSignals(True)
@@ -219,7 +224,8 @@ class ChannelsTab(BaseTab):
         cp = self.cp
         with _Block([self.e_contact, self.e_group]):
             self.e_contact.clear()
-            self.e_contact.addItem("(aucun)", None)
+            if not cp.LIMITS["contact0_fixed"]:
+                self.e_contact.addItem("(aucun)", None)
             for s, c in sorted(cp.contacts.items()):
                 self.e_contact.addItem(f"{c.name} ({c.dmr_id})", s)
             self.e_group.clear()
@@ -321,9 +327,9 @@ class ChannelsTab(BaseTab):
 
     # -- actions --
     def add(self):
-        slot = self.cp.free_slot(self.cp.channels, L.CH_MAX)
+        slot = self.cp.free_slot(self.cp.channels, self.cp.LIMITS["channels"])
         if slot is None:
-            QMessageBox.warning(self, "Mémoire pleine", "Les 1024 canaux sont utilisés.")
+            QMessageBox.warning(self, "Mémoire pleine", "Tous les canaux sont utilisés.")
             return
         self.cp.channels[slot] = Channel(name=f"CANAL {slot + 1}", analog=True,
                                          rx=14550000, tx=14550000, narrow=False)
@@ -337,7 +343,7 @@ class ChannelsTab(BaseTab):
     def duplicate(self):
         import copy
         for s in self.selected_slots():
-            slot = self.cp.free_slot(self.cp.channels, L.CH_MAX)
+            slot = self.cp.free_slot(self.cp.channels, self.cp.LIMITS["channels"])
             if slot is None:
                 break
             ch = copy.deepcopy(self.cp.channels[s])
@@ -414,6 +420,8 @@ class ContactsTab(BaseTab):
         items = [(s, c) for s, c in sorted(self.cp.contacts.items())
                  if not q or q in c.name.lower() or q in str(c.dmr_id)]
         self.table.blockSignals(True)
+        self.table.setUpdatesEnabled(False)
+        self.table.setRowCount(0)
         self.table.setRowCount(len(items))
         for r, (s, c) in enumerate(items):
             it = QTableWidgetItem(c.name)
@@ -421,13 +429,19 @@ class ContactsTab(BaseTab):
             self.table.setItem(r, 0, it)
             self.table.setItem(r, 1, QTableWidgetItem(CONTACT_TYPES[c.ctype]))
             self.table.setItem(r, 2, QTableWidgetItem(str(c.dmr_id)))
+        self.table.setUpdatesEnabled(True)
         self.table.blockSignals(False)
-        self.count.setText(f"{len(self.cp.contacts)} / {L.CT_MAX}")
+        self.count.setText(f"{len(self.cp.contacts)} / {self.cp.LIMITS['contacts']}")
 
     def on_edit(self, item):
         slot = self.table.item(item.row(), 0).data(Qt.UserRole)
         c = self.cp.contacts.get(slot)
         if c is None:
+            return
+        if slot == 0 and self.cp.LIMITS["contact0_fixed"] and item.column() != 0:
+            QMessageBox.information(self, "All Call", "Le contact « All Call » est fixe : "
+                                    "seul son nom peut être modifié.")
+            self.refresh()
             return
         if item.column() == 0:
             c.name = item.text()[:16]
@@ -449,9 +463,9 @@ class ContactsTab(BaseTab):
         self.changed.emit()
 
     def add(self):
-        slot = self.cp.free_slot(self.cp.contacts, L.CT_MAX)
+        slot = self.cp.free_slot(self.cp.contacts, self.cp.LIMITS["contacts"])
         if slot is None:
-            QMessageBox.warning(self, "Mémoire pleine", "Les 2048 contacts sont utilisés.")
+            QMessageBox.warning(self, "Mémoire pleine", "Tous les contacts sont utilisés.")
             return
         self.cp.contacts[slot] = Contact(name="Nouveau TG", ctype=1, dmr_id=91)
         self.filter.clear()
@@ -467,7 +481,11 @@ class ContactsTab(BaseTab):
                                 "Ils seront retirés des canaux et des groupes RX.") != QMessageBox.Yes:
             return
         for r in rows:
-            self.cp.delete_contact(self.table.item(r, 0).data(Qt.UserRole))
+            slot = self.table.item(r, 0).data(Qt.UserRole)
+            if slot == 0 and self.cp.LIMITS["contact0_fixed"]:
+                QMessageBox.information(self, "All Call", "Le contact « All Call » ne peut pas être supprimé.")
+                continue
+            self.cp.delete_contact(slot)
         self.refresh()
         self.changed.emit()
 
@@ -477,9 +495,21 @@ class ContactsTab(BaseTab):
 class _MembersTab(BaseTab):
     """Liste d'objets à gauche ; à droite nom + membres choisis parmi des disponibles."""
     TITLE = ""
-    MAX_ITEMS = 0
-    MAX_MEMBERS = 0
-    SCAN = False
+    K_ITEMS = ""
+    K_MEMBERS = ""
+    K_SCAN = None
+
+    @property
+    def MAX_ITEMS(self):
+        return self.cp.LIMITS[self.K_ITEMS] if self.cp else 0
+
+    @property
+    def MAX_MEMBERS(self):
+        return self.cp.LIMITS[self.K_MEMBERS] if self.cp else 0
+
+    @property
+    def SCAN(self):
+        return bool(self.cp and self.K_SCAN and self.cp.LIMITS[self.K_SCAN])
 
     def __init__(self):
         super().__init__()
@@ -697,8 +727,8 @@ class _MembersTab(BaseTab):
 
 class GroupsTab(_MembersTab):
     TITLE = "Groupe RX (talkgroups écoutés)"
-    MAX_ITEMS = L.GL_MAX
-    MAX_MEMBERS = L.GL_IDS
+    K_ITEMS = "groups"
+    K_MEMBERS = "group_ids"
 
     def items(self):
         return self.cp.groups
@@ -721,9 +751,9 @@ class GroupsTab(_MembersTab):
 
 class ZonesTab(_MembersTab):
     TITLE = "Zone"
-    MAX_ITEMS = L.ZN_MAX
-    MAX_MEMBERS = L.ZN_CH_MAX
-    SCAN = True
+    K_ITEMS = "zones"
+    K_MEMBERS = "zone_channels"
+    K_SCAN = "zone_scan"
 
     def items(self):
         return self.cp.zones

@@ -116,7 +116,7 @@ def import_channels(cp: Codeplug, path: str, replace: bool) -> tuple[int, list[s
             if num.isdigit() and 1 <= int(num) <= 1024 and (int(num) - 1) not in cp.channels:
                 slot = int(num) - 1
             if slot is None:
-                slot = cp.free_slot(cp.channels, 1024)
+                slot = cp.free_slot(cp.channels, cp.LIMITS["channels"])
             if slot is None:
                 warn.append("Mémoire pleine (1024 canaux) : import arrêté.")
                 break
@@ -151,9 +151,9 @@ def import_contacts(cp: Codeplug, path: str, replace: bool) -> tuple[int, list[s
             name = _get(r, "nom", "name", "contact name", "callsign")
             t = _get(r, "type", "call type").lower()
             ctype = 0 if t.startswith(("pri", "pers", "ind")) else 2 if t.startswith(("tous", "all")) else 1
-            slot = cp.free_slot(cp.contacts, 2048)
+            slot = cp.free_slot(cp.contacts, cp.LIMITS["contacts"])
             if slot is None:
-                warn.append("Mémoire pleine (2048 contacts) : import arrêté.")
+                warn.append("Mémoire pleine : import arrêté.")
                 break
             cp.contacts[slot] = Contact(name=name, ctype=ctype, dmr_id=dmr_id)
             n += 1

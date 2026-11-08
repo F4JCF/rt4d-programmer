@@ -7,6 +7,7 @@ import os
 from typing import Callable, Optional
 
 from . import layout as L
+from . import stock as S
 from .codeplug import Codeplug
 from .protocol import (BLOCK, SPI_SIZE_KB, CancelCheck, Cancelled, NormalLink, Progress,
                        RadioError)
@@ -52,9 +53,40 @@ def _open_normal(port: str, log: Log) -> NormalLink:
         link.close()
         raise RadioError("La radio est en mode bootloader (allumée avec le PTT enfoncé). "
                          "Rallumez-la normalement pour lire ou écrire le codeplug.")
+    return link
+
+
+def _detect_format(rd: "BlockCache") -> tuple[str, int]:
+    """('refw', banque) / ('stock', 0x2000) / ('inconnu', 0x2000)."""
+    bank, refw = _settings_bank(rd)
+    if refw:
+        return "refw", bank
+    if S.looks_like_stock(rd.read(S.A_CONTACT, 8)):
+        return "stock", S.A_CFG
+    return "inconnu", bank
+
+
+def _connect(link: NormalLink, fmt: str, log: Log):
+    if fmt == "stock":
+        for _ in range(3):
+            link.ser.write(S.CONNECT)
+            r = link._read_exact(1)
+            if r and r[0] == 0x06:
+                return
+        raise RadioError("La radio n'a pas accepté l'ouverture de la session de programmation.")
     if not link.notify():
         log("Avertissement : la radio n'a pas accusé réception de l'ouverture de session.")
-    return link
+
+
+def _read_stock(rd: "BlockCache", progress: Progress, log: Log) -> "S.StockCodeplug":
+    image = bytearray(b"\xFF" * S.IMAGE_SIZE)
+    n = len(S.READ_BLOCKS)
+    log("Lecture du codeplug (firmware officiel Radtel)…")
+    for i, kb in enumerate(S.READ_BLOCKS):
+        image[kb * BLOCK:(kb + 1) * BLOCK] = rd.read(kb * BLOCK, BLOCK)
+        if progress:
+            progress(i + 1, n, "Lecture")
+    return S.StockCodeplug(bytes(image))
 
 
 def _settings_bank(rd: BlockCache) -> tuple[int, bool]:
@@ -93,8 +125,19 @@ def _estimate_blocks() -> int:
     return n
 
 
-def _read_all(link: NormalLink, progress: Progress, cancel: CancelCheck, log: Log) -> Codeplug:
+def _read_all(link: NormalLink, progress: Progress, cancel: CancelCheck, log: Log,
+              connected: bool = False):
     rd = BlockCache(link, cancel)
+    fmt, bank = _detect_format(rd)
+    log({"refw": "Firmware REFW (beta 41 ou plus) détecté.",
+         "stock": "Firmware officiel Radtel (V3.18 ou plus récent) détecté.",
+         "inconnu": "Format NON reconnu (firmware officiel ancien ou REFW ancien) : "
+                    "lecture seule."}[fmt])
+    if not connected:
+        _connect(link, fmt, log)
+    if fmt == "stock":
+        return _read_stock(rd, progress, log)
+    refw = fmt == "refw"
     total = _estimate_blocks()
     done = [0]
 
@@ -103,10 +146,6 @@ def _read_all(link: NormalLink, progress: Progress, cancel: CancelCheck, log: Lo
         if progress:
             progress(min(done[0], total), total, "Lecture")
 
-    bank, refw = _settings_bank(rd)
-    log(f"Réglages trouvés à 0x{bank:06X} — "
-        + ("firmware REFW (beta 41 ou plus) détecté." if refw else
-           "format REFW NON détecté (firmware officiel Radtel ou REFW ancien)."))
     image = bytearray(b"\xFF" * L.FILE_SIZE)
     for name in L.READ_SECTIONS:
         off, size, spi, _ = L.SECTIONS[name]
@@ -130,15 +169,15 @@ def identify(port: str, log: Log = print) -> str:
         mode = link.detect_mode()
         if mode == "bootloader":
             return "Radio détectée en MODE BOOTLOADER (prête pour un flash de firmware)."
-        link.notify()
         rd = BlockCache(link)
-        bank, refw = _settings_bank(rd)
-        link.close_session()
-        if refw:
+        fmt, bank = _detect_format(rd)
+        if fmt == "refw":
             return f"Radio détectée en mode normal — firmware REFW (réglages en banque 0x{bank:06X})."
-        return ("Radio détectée en mode normal — firmware REFW non détecté "
-                "(firmware officiel Radtel ?). Lecture et sauvegarde possibles, "
-                "écriture du codeplug bloquée.")
+        if fmt == "stock":
+            return ("Radio détectée en mode normal — firmware OFFICIEL Radtel (V3.18 ou plus "
+                    "récent). Lecture et écriture disponibles.")
+        return ("Radio détectée en mode normal — format non reconnu (firmware ancien ?). "
+                "Lecture et sauvegarde complète possibles, écriture du codeplug bloquée.")
     finally:
         link.close()
 
@@ -160,6 +199,8 @@ def write_codeplug(port: str, cp: Codeplug, sections: list[str], backup_dir: str
 
     Retourne le chemin du fichier de sauvegarde créé.
     """
+    if getattr(cp, "kind", "refw") == "stock":
+        return _write_stock(port, cp, backup_dir, progress, cancel, log)
     for s in sections:
         if s not in L.EDITABLE_SECTIONS:
             raise RadioError(f"Section non modifiable : {s}")
@@ -174,7 +215,7 @@ def write_codeplug(port: str, cp: Codeplug, sections: list[str], backup_dir: str
     try:
         log("Sauvegarde du contenu actuel de la radio avant écriture…")
         before = _read_all(link, progress, cancel, log)
-        if not before.is_refw:
+        if getattr(before, "kind", "") != "refw" or not before.is_refw:
             raise RadioError("Le firmware REFW n'est pas détecté sur la radio : écriture annulée "
                              "pour ne pas risquer de corrompre un format inconnu. Flashez d'abord "
                              "le firmware REFW (menu Firmware).")
@@ -284,3 +325,70 @@ def restore_spi(port: str, dump: bytes, include_calibration: bool, progress: Pro
         log("Restauration terminée.")
     finally:
         link.close()
+
+
+def _write_stock(port: str, cp: "S.StockCodeplug", backup_dir: str, progress: Progress,
+                 cancel: CancelCheck, log: Log) -> str:
+    """Écriture au firmware officiel : même séquence que le CPS Radtel V2.07."""
+    problems = cp.validate()
+    if problems:
+        raise RadioError("Le codeplug contient des erreurs :\n• " + "\n• ".join(problems[:15]))
+    data = bytearray(cp.build())
+    link = _open_normal(port, log)
+    try:
+        rd = BlockCache(link, cancel)
+        fmt, _ = _detect_format(rd)
+        if fmt != "stock":
+            raise RadioError("La radio ne contient pas le firmware officiel Radtel V3.18+ "
+                             "attendu pour ce codeplug : écriture annulée.")
+        _connect(link, "stock", log)
+        log("Sauvegarde du contenu actuel de la radio avant écriture…")
+        before = _read_stock(rd, progress, log)
+        os.makedirs(backup_dir, exist_ok=True)
+        stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        backup_path = os.path.join(backup_dir, f"RT4D-avant-ecriture-{stamp}.rt4d")
+        with open(backup_path, "wb") as f:
+            f.write(bytes(before.image))
+        log(f"Sauvegarde enregistrée : {backup_path}")
+
+        # Comme le CPS : relire les blocs 0 et 8, garder mot de passe et fin des réglages
+        if link.read_block(0) is None:
+            raise RadioError("La radio a refusé la lecture du bloc 0.")
+        live = link.read_block(8)
+        if live is None:
+            raise RadioError("La radio a refusé la lecture des réglages.")
+        cfg = S.A_CFG
+        data[cfg:cfg + 12] = live[0:12]
+        data[cfg + 14:cfg + 16] = b"\xFF\xFF"
+        data[cfg + 960:cfg + 1024] = live[960:1024]
+
+        total = sum(n for _, _, n, _ in S.WRITE_REGIONS)
+        done = [0]
+
+        def prog(i, n, label):
+            if progress:
+                progress(done[0] + i, total, label)
+
+        for region, addr, nblocks, label in S.WRITE_REGIONS:
+            log(f"Écriture : {label}…")
+            link.write_region(region, bytes(data[addr:addr + nblocks * BLOCK]), prog, cancel, label)
+            done[0] += nblocks
+        link.ser.write(S.END)
+        log("Écriture terminée. La radio redémarre.")
+        return backup_path
+    finally:
+        link.close()
+
+
+def load_any(path: str):
+    """Ouvre un .4rdmf (REFW), une image .rt4d (officiel) ou une sauvegarde complète .bin."""
+    with open(path, "rb") as f:
+        data = f.read()
+    if len(data) in (L.FILE_SIZE, L.FILE_SIZE_LEGACY):
+        return Codeplug(data)
+    if len(data) >= S.IMAGE_SIZE and S.looks_like_stock(data[S.A_CONTACT:S.A_CONTACT + 5]):
+        return S.StockCodeplug(data[:S.IMAGE_SIZE])
+    if len(data) == SPI_SIZE_KB * BLOCK:
+        raise RadioError("Cette sauvegarde complète ne vient pas d'un firmware officiel V3.18+ : "
+                         "elle sert uniquement à restaurer la radio (menu Radio).")
+    raise RadioError(f"Format de fichier non reconnu ({len(data)} octets).")

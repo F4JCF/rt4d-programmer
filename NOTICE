@@ -10,6 +10,10 @@ Dual Tachyon dans les projets suivants, sous licence Apache 2.0 :
   Licensed under the Apache License, Version 2.0
   http://www.apache.org/licenses/LICENSE-2.0
 
+La carte mémoire et la séquence d'écriture du firmware officiel Radtel (V3.18+)
+ont été déterminées, à des fins d'interopérabilité, par analyse du logiciel
+officiel « RT-4D CPS V2.07 ». Aucun code de ce logiciel n'est repris.
+
 La description de la carte mémoire du codeplug REFW (beta 41+) s'appuie sur
 la documentation technique du projet RT4D Editor (jcalado/rt4d-cps). Aucun
 code de ce projet n'a été copié.

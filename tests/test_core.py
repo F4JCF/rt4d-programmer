@@ -252,3 +252,124 @@ def test_flash_over_pty():
         assert bytes(r.firmware[:len(fw)]) == fw
     finally:
         pty.stop = True
+
+
+# ───────────────────────── firmware officiel Radtel V3.18+ ─────────────────────────
+
+from rt4dprog import stock as S
+
+
+def make_stock_spi():
+    spi = bytearray(b"\xFF" * (4096 * 1024))
+    cfg = bytearray(b"\xFF" * 0x1000)
+    cfg[12:14] = b"\xCD\xAB"
+    cfg[16:28] = bytes([1, 0, 0, 1, 1, 0, 0, 3, 0, 0x28, 0, 0])
+    cfg[76:81] = b"F4JCF"
+    cfg[384:388] = bcd_encode(2080845)
+    spi[0x2000:0x3000] = cfg
+    spi[0x3000:0x4000] = cfg
+    ch = bytearray(b"\x00" * 48)
+    ch[0] = 0x40
+    ch[1] = 0x10
+    ch[2] = 0x40
+    ch[4] = 0x40
+    struct.pack_into("<I", ch, 5, 14550000)
+    struct.pack_into("<I", ch, 9, 14550000)
+    ch[0x16] = 1
+    ch[0x20:0x30] = b"S20" + b"\xFF" * 13
+    spi[0x4000:0x4030] = ch
+    d = bytearray(ch)
+    d[0] = 0x02
+    struct.pack_into("<I", d, 5, 43050000)
+    struct.pack_into("<I", d, 9, 43890000)
+    struct.pack_into("<H", d, 0x11, 2)
+    d[0x13] = 1
+    d[0x20:0x30] = b"RELAIS" + b"\xFF" * 10
+    spi[0x4030:0x4060] = d
+    spi[0x10000:0x1C000] = spi[0x4000:0x10000]
+    cts = [(2, 0xAAAAAAAA, "All Call"), (1, 91, "TG Monde"), (1, 208, "TG France")]
+    for i, (t, idv, name) in enumerate(cts):
+        r = bytearray(b"\xFF" * 21)
+        r[0] = t
+        r[1:5] = b"\xAA" * 4 if i == 0 else bcd_encode(idv)
+        r[5:5 + len(name)] = name.encode()
+        spi[0x5E000 + 21 * i:0x5E000 + 21 * (i + 1)] = r
+    for i in range(250):
+        r = bytearray(b"\xFF" * 80)
+        nm = (" RxGrp France" if i == 0 else f"TG List-{i + 1:03d}").encode()
+        r[:len(nm)] = nm
+        if i == 0:
+            struct.pack_into("<HH", r, 16, 2, 1)
+        spi[0xC6000 + 80 * i:0xC6000 + 80 * (i + 1)] = r
+    for i in range(250):
+        r = bytearray(b"\xFF" * 520)
+        struct.pack_into("<HH", r, 0, 0, 0)
+        nm = ("Locale" if i == 0 else f"Zone-{i + 1:03d}").encode()
+        r[4:4 + len(nm)] = nm
+        if i == 0:
+            struct.pack_into("<HH", r, 20, 0, 1)
+        spi[0x1E000 + 520 * i:0x1E000 + 520 * (i + 1)] = r
+    return spi
+
+
+@pytest.fixture
+def stock_radio(monkeypatch):
+    r = FakeRadio(make_stock_spi(), stock=True)
+    monkeypatch.setattr(protocol.NormalLink, "open", classmethod(lambda cls, port: cls(r)))
+    return r
+
+
+def test_stock_read(stock_radio):
+    cp = radio_ops.read_codeplug("X", log=lambda m: None)
+    assert cp.kind == "stock"
+    assert cp.settings.radio_id == 2080845 and cp.settings.radio_name == "F4JCF"
+    assert cp.channels[1].name == "RELAIS" and cp.channels[1].contact == 2 and cp.channels[1].group == 0
+    assert [c.name for c in cp.contacts.values()] == ["All Call", "TG Monde", "TG France"]
+    assert cp.groups[0].name == "RxGrp France" and cp.groups[0].contacts == [2, 1]
+    assert list(cp.zones) == [0] and cp.zones[0].channels == [0, 1]
+    assert cp.build() == bytes(cp.image)
+
+
+def test_stock_write(stock_radio, tmp_path):
+    cp = radio_ops.read_codeplug("X", log=lambda m: None)
+    cp.channels[2] = Channel(name="NOUVEAU", analog=True, rx=14500000, tx=14500000)
+    cp.contacts[3] = Contact(name="TG 20806", ctype=1, dmr_id=20806)
+    cp.delete_contact(1)                       # compactage : 2→1, 3→2
+    cp.groups[0].contacts.append(3)
+    cp.zones[5] = Zone(name="Nouvelle", channels=[2, 0])
+    cp.settings.radio_name = "F4JCF-2"
+    bk = radio_ops.write_codeplug("X", cp, [], str(tmp_path), log=lambda m: None)
+    assert bk.endswith(".rt4d") and os.path.getsize(bk) == S.IMAGE_SIZE
+    regions = [r for r, _ in stock_radio.writes]
+    assert sorted(set(regions)) == [0x90, 0x91, 0x92, 0x93, 0x94, 0x95, 0x96, 0x97, 0x98]
+    assert len(regions) == 426
+    cp2 = radio_ops.read_codeplug("X", log=lambda m: None)
+    assert [c.name for c in cp2.contacts.values()] == ["All Call", "TG France", "TG 20806"]
+    assert cp2.channels[1].contact == 1                     # suivi du compactage
+    assert cp2.groups[0].contacts == [1, 2]
+    assert cp2.zones[5].name == "Nouvelle" and cp2.zones[5].channels == [2, 0]
+    assert cp2.channels[2].name == "NOUVEAU"
+    assert cp2.settings.radio_name == "F4JCF-2"
+    # zone inutilisée réécrite avec son nom par défaut
+    assert stock_radio.spi[0x1E000 + 520 * 7 + 4:0x1E000 + 520 * 7 + 12] == b"Zone-008"
+
+
+def test_stock_file_and_backup_open(stock_radio, tmp_path):
+    p = str(tmp_path / "full.bin")
+    radio_ops.backup_spi("X", p, log=lambda m: None)
+    cp = radio_ops.load_any(p)
+    assert cp.kind == "stock" and cp.channels[0].name == "S20"
+    f = str(tmp_path / "a.rt4d")
+    cp.save(f)
+    assert radio_ops.load_any(f).zones[0].name == "Locale"
+
+
+REAL = "/home/claude/dump/spi.bin"
+
+
+@pytest.mark.skipif(not os.path.exists(REAL), reason="sauvegarde réelle absente")
+def test_real_backup_roundtrip():
+    data = open(REAL, "rb").read()
+    cp = S.StockCodeplug(data)
+    assert len(cp.channels) == 460 and len(cp.zones) == 11
+    assert cp.build() == data[:S.IMAGE_SIZE]

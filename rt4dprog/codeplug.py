@@ -133,8 +133,8 @@ class Channel:
             ctdcs_select=(b[4] >> 1) & 0x07, tail_tone=b[3] & 0x07,
             ana_busy=(b[3] >> 3) & 0x03, dmr_busy=(b[3] >> 5) & 0x03,
             color_code=(b[1] >> 4) & 0x0F, timeslot=(b[0] >> 1) & 1,
-            contact=None if ct == 0xFFFF or ct >= L.CT_MAX else ct,
-            group=None if gl in (0, 0xFF) or gl > L.GL_MAX else gl - 1,
+            contact=None if ct == 0xFFFF else ct,
+            group=None if gl in (0, 0xFF) else gl - 1,
             encrypt=struct.unpack_from("<H", b, 0x14)[0],
             use_radio_id=not ((b[0] >> 3) & 1), dmr_id=bcd_decode(b[0x16:0x1A]),
             rx_tx=(b[0] >> 4) & 0x03, monitor=b[0] & 1, dcdm=(b[0] >> 2) & 1,
@@ -165,7 +165,7 @@ class Channel:
         struct.pack_into("<H", d, 0x11, 0xFFFF if self.contact is None else self.contact)
         d[0x13] = 0 if self.group is None else self.group + 1
         struct.pack_into("<H", d, 0x14, self.encrypt & 0xFFFF)
-        d[0x16:0x1A] = bcd_encode(0 if self.use_radio_id else self.dmr_id)
+        d[0x16:0x1A] = bcd_encode(self.dmr_id)
         struct.pack_into("<I", d, 0x1A, self.mute_code & 0xFFFFFFFF)
         put_name(d, 0x20, self.name, 16)
         return bytes(d)
@@ -280,6 +280,11 @@ class Settings:
 # ───────────────────────────── codeplug ─────────────────────────────
 
 class Codeplug:
+    """Codeplug au format REFW (fichier .4rdmf)."""
+    kind = "refw"
+    LIMITS = dict(channels=L.CH_MAX, contacts=L.CT_MAX, groups=L.GL_MAX, group_ids=L.GL_IDS,
+                  zones=L.ZN_MAX, zone_channels=L.ZN_CH_MAX, zone_scan=True, contact0_fixed=False)
+
     def __init__(self, image: bytes | None = None):
         if image is None:
             image = b"\xFF" * L.FILE_SIZE
@@ -317,6 +322,10 @@ class Codeplug:
         for i in range(L.CH_MAX):
             c = Channel.parse(img[co + i * L.CH_SIZE: co + (i + 1) * L.CH_SIZE])
             if c:
+                if c.contact is not None and c.contact >= L.CT_MAX:
+                    c.contact = None
+                if c.group is not None and c.group >= L.GL_MAX:
+                    c.group = None
                 self.channels[i] = c
         co = L.SECTIONS["contacts"][0]
         self.contacts: dict[int, Contact] = {}

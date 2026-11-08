@@ -22,10 +22,9 @@ from .protocol import Cancelled, RadioError
 
 HELP = """
 <h3>RT4D Programmer — mode d'emploi rapide</h3>
-<p><b>Ce logiciel programme le Radtel RT-4D équipé du firmware communautaire REFW</b>
-(Dual Tachyon, beta 41 ou plus récente). Avec le firmware officiel Radtel, il peut
-lire la radio et faire une sauvegarde complète, mais il refuse d'écrire le codeplug,
-car le format diffère.</p>
+<p><b>Ce logiciel programme le Radtel RT-4D</b> avec le <b>firmware officiel Radtel
+V3.18 ou plus récent</b> (testé avec la V3.22) ou avec le firmware communautaire
+<b>REFW</b> (beta 41 ou plus). Le format est détecté automatiquement.</p>
 <h4>Programmer la radio</h4>
 <ol>
 <li>Branchez le câble USB, allumez la radio <b>normalement</b>, choisissez le port.</li>
@@ -149,9 +148,16 @@ class WriteDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Écrire dans la radio")
         v = QVBoxLayout(self)
-        v.addWidget(QLabel("Parties à écrire dans la radio :"))
         self.checks = {}
-        for s in L.EDITABLE_SECTIONS:
+        if getattr(cp, "kind", "refw") == "stock":
+            lab = QLabel("Firmware officiel Radtel : comme le logiciel officiel, tout le codeplug "
+                         "est écrit (réglages, canaux, zones, contacts, groupes RX…). Les parties "
+                         "non gérées ici sont réécrites telles qu'elles ont été lues.")
+            lab.setWordWrap(True)
+            v.addWidget(lab)
+        else:
+            v.addWidget(QLabel("Parties à écrire dans la radio :"))
+        for s in (L.EDITABLE_SECTIONS if getattr(cp, "kind", "refw") == "refw" else []):
             cb = QCheckBox(L.SECTION_LABELS[s])
             cb.setChecked(True)
             if s == "settings" and not (cp.has_settings and cp.is_refw):
@@ -185,6 +191,8 @@ class WriteDialog(QDialog):
             self.dir.setText(d)
 
     def sections(self):
+        if not self.checks:
+            return ["all"]
         return [s for s, cb in self.checks.items() if cb.isChecked()]
 
 
@@ -416,7 +424,10 @@ class MainWindow(QMainWindow):
 
     def update_banner(self):
         cp = self.cp
-        if not cp.has_settings:
+        if getattr(cp, "kind", "refw") == "stock":
+            txt, col = ("Firmware officiel Radtel (V3.18 ou plus récent) : lecture et écriture "
+                        "disponibles."), "#1e7e34"
+        elif not cp.has_settings:
             txt, col = ("Codeplug sans réglages radio : vous pouvez préparer canaux, contacts et "
                         "zones, puis les écrire (les réglages de la radio seront conservés)."), "#2c3e50"
         elif cp.is_refw:
@@ -460,18 +471,21 @@ class MainWindow(QMainWindow):
     def open_file(self):
         if not self.confirm_discard():
             return
-        path, _ = QFileDialog.getOpenFileName(self, "Ouvrir un codeplug", self.last_dir(),
-                                              "Codeplug RT-4D (*.4rdmf);;Tous les fichiers (*)")
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Ouvrir un codeplug", self.last_dir(),
+            "Codeplugs RT-4D (*.rt4d *.4rdmf *.bin);;Firmware officiel (*.rt4d);;"
+            "REFW (*.4rdmf);;Sauvegarde complète (*.bin);;Tous les fichiers (*)")
         if not path:
             return
         try:
-            cp = Codeplug.load(path)
+            cp = radio_ops.load_any(path)
+            if path.lower().endswith(".bin"):
+                path = None          # ne jamais réécrire une sauvegarde complète
         except Exception as e:
             QMessageBox.critical(self, "Ouverture", str(e))
             return
-        self.set_last_dir(path)
         self.load_codeplug(cp, path)
-        self.log(f"Fichier ouvert : {path}")
+        self.log(f"Fichier ouvert : {path or 'sauvegarde complète (lecture)'}")
 
     def save_file(self) -> bool:
         if not self.path:
@@ -488,13 +502,14 @@ class MainWindow(QMainWindow):
         return True
 
     def save_as(self) -> bool:
+        ext = ".rt4d" if getattr(self.cp, "kind", "refw") == "stock" else ".4rdmf"
+        label = "Codeplug firmware officiel (*.rt4d)" if ext == ".rt4d" else "Codeplug REFW (*.4rdmf)"
         path, _ = QFileDialog.getSaveFileName(self, "Enregistrer le codeplug",
-                                              os.path.join(self.last_dir(), "RT4D.4rdmf"),
-                                              "Codeplug RT-4D (*.4rdmf)")
+                                              os.path.join(self.last_dir(), "RT4D" + ext), label)
         if not path:
             return False
-        if not path.lower().endswith(".4rdmf"):
-            path += ".4rdmf"
+        if not path.lower().endswith(ext):
+            path += ext
         self.path = path
         self.set_last_dir(path)
         return self.save_file()
@@ -560,11 +575,11 @@ class MainWindow(QMainWindow):
             self.update_title()
             self.log(f"Lecture terminée : {len(cp.channels)} canaux, {len(cp.contacts)} contacts, "
                      f"{len(cp.groups)} groupes RX, {len(cp.zones)} zones.")
-            if not cp.is_refw:
-                QMessageBox.warning(self, "Firmware non REFW",
-                                    "La radio ne semble pas utiliser le firmware REFW. Les données "
-                                    "affichées peuvent être fausses et l'écriture est bloquée.\n\n"
-                                    "Pensez à enregistrer ce fichier comme sauvegarde.")
+            if getattr(cp, "kind", "refw") == "refw" and not cp.is_refw:
+                QMessageBox.warning(self, "Format non reconnu",
+                                    "Le format de cette radio n'est pas reconnu (firmware ancien ?). "
+                                    "Les données affichées peuvent être fausses et l'écriture est "
+                                    "bloquée.\n\nPensez à enregistrer ce fichier comme sauvegarde.")
 
     def write_radio(self):
         port = self.port_name()
