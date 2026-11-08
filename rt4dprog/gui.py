@@ -6,12 +6,14 @@ import os
 import sys
 import traceback
 
-from PySide6.QtCore import QObject, QSettings, Qt, QThread, QTimer, QUrl, Signal
+from PySide6.QtCore import (QAbstractTableModel, QModelIndex, QObject, QSettings, Qt, QThread,
+                            QTimer, QUrl, Signal)
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtGui import QAction, QColor, QFont, QIcon, QKeySequence, QPainter
 from PySide6.QtWidgets import (QApplication, QCheckBox, QMenuBar, QProgressDialog, QComboBox, QDialog, QDialogButtonBox,
                                QFileDialog, QFormLayout, QHBoxLayout, QLabel, QLineEdit,
-                               QListWidget, QListWidgetItem,
+                               QListWidget, QListWidgetItem, QAbstractItemView, QSplitter,
+                               QTableView,
                                QMainWindow, QMessageBox, QPlainTextEdit, QProgressBar,
                                QPushButton, QTabWidget, QToolBar, QVBoxLayout, QWidget)
 
@@ -309,8 +311,38 @@ class RestoreDialog(QDialog):
         v.addWidget(bb)
 
 
-class AddressBookDialog(QDialog):
-    """Carnet d'adresses DMR : source, filtre par pays, envoi à la radio."""
+class EntriesModel(QAbstractTableModel):
+    HEAD = ["ID DMR", "Indicatif", "Nom", "Ville", "Région", "Pays"]
+
+    def __init__(self):
+        super().__init__()
+        self.rows = []
+
+    def set_rows(self, rows):
+        self.beginResetModel()
+        self.rows = rows
+        self.endResetModel()
+
+    def rowCount(self, parent=QModelIndex()):
+        return 0 if parent.isValid() else len(self.rows)
+
+    def columnCount(self, parent=QModelIndex()):
+        return 6
+
+    def data(self, index, role=Qt.DisplayRole):
+        if role != Qt.DisplayRole or not index.isValid():
+            return None
+        e = self.rows[index.row()]
+        return (e.dmr_id, e.callsign, e.name, e.city, e.state, e.country)[index.column()]
+
+    def headerData(self, section, orientation, role=Qt.DisplayRole):
+        if role == Qt.DisplayRole and orientation == Qt.Horizontal:
+            return self.HEAD[section]
+        return None
+
+
+class AddressBookTab(QWidget):
+    """Onglet « Carnet adresse DMR » : base RadioID.net gardée sur le PC, choix des pays, envoi."""
 
     PRESETS = {
         "France seulement": {"France"},
@@ -318,74 +350,119 @@ class AddressBookDialog(QDialog):
                                    "Spain", "Germany", "Luxembourg", "Andorra"},
     }
 
-    def __init__(self, parent):
-        super().__init__(parent)
-        self.setWindowTitle("Carnet d'adresses DMR (noms des correspondants)")
-        self.setMinimumSize(560, 600)
+    def __init__(self, main):
+        super().__init__()
+        self.main = main
         self.entries: list = []
         self.payload = b""
         v = QVBoxLayout(self)
         intro = QLabel("La radio affiche l'indicatif et le nom de la station qui vous appelle en DMR, "
-                       "grâce à la base mondiale des identifiants (RadioID.net). Choisissez les pays "
-                       "à inclure : la base complète prend environ 20 minutes à envoyer.")
+                       "grâce à la base mondiale des identifiants (RadioID.net). Mettez la liste à jour, "
+                       "cochez les pays voulus puis envoyez-la à la radio.")
         intro.setWordWrap(True)
         v.addWidget(intro)
         row = QHBoxLayout()
-        b1 = QPushButton("Télécharger depuis RadioID.net")
-        b1.clicked.connect(self.download)
-        b2 = QPushButton("Ouvrir un CSV…")
-        b2.clicked.connect(self.open_csv)
-        row.addWidget(b1)
-        row.addWidget(b2)
+        b = QPushButton("⟳  Mettre à jour la liste (RadioID.net)")
+        b.clicked.connect(self.download)
+        row.addWidget(b)
+        b = QPushButton("Ouvrir un CSV…")
+        b.clicked.connect(self.open_csv)
+        row.addWidget(b)
+        row.addStretch()
+        self.btn_send = QPushButton("Envoyer à la radio")
+        self.btn_send.setStyleSheet("font-weight: bold;")
+        self.btn_send.clicked.connect(self.send)
+        row.addWidget(self.btn_send)
         v.addLayout(row)
-        self.src = QLabel("Aucune base chargée.")
+        self.src = QLabel()
         v.addWidget(self.src)
+        split = QSplitter(Qt.Horizontal)
+        left = QWidget()
+        lv = QVBoxLayout(left)
+        lv.setContentsMargins(0, 0, 0, 0)
+        lv.addWidget(QLabel("Pays à inclure :"))
         prow = QHBoxLayout()
-        prow.addWidget(QLabel("Pays :"))
         for name in list(self.PRESETS) + ["Tous", "Aucun"]:
-            b = QPushButton(name)
-            b.clicked.connect(lambda _=False, n=name: self.preset(n))
-            prow.addWidget(b)
-        v.addLayout(prow)
-        self.filter = QLineEdit(placeholderText="Filtrer la liste des pays…")
-        self.filter.textChanged.connect(self.apply_filter)
-        v.addWidget(self.filter)
+            pb = QPushButton(name)
+            pb.clicked.connect(lambda _=False, n=name: self.preset(n))
+            prow.addWidget(pb)
+        lv.addLayout(prow)
+        self.cfilter = QLineEdit(placeholderText="Filtrer la liste des pays…")
+        self.cfilter.textChanged.connect(self.filter_countries)
+        lv.addWidget(self.cfilter)
         self.list = QListWidget()
-        self.list.itemChanged.connect(self.update_summary)
-        v.addWidget(self.list, 1)
+        self.list.itemChanged.connect(self.selection_changed)
+        lv.addWidget(self.list, 1)
+        split.addWidget(left)
+        right = QWidget()
+        rv = QVBoxLayout(right)
+        rv.setContentsMargins(0, 0, 0, 0)
+        self.search = QLineEdit(placeholderText="Rechercher un indicatif, un nom, un ID ou une ville "
+                                                "(parmi les pays cochés)…")
+        self.search.textChanged.connect(lambda: self._search_timer.start(300))
+        rv.addWidget(self.search)
+        self.model = EntriesModel()
+        self.table = QTableView()
+        self.table.setModel(self.model)
+        self.table.verticalHeader().setVisible(False)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table.horizontalHeader().setStretchLastSection(True)
+        rv.addWidget(self.table, 1)
+        split.addWidget(right)
+        split.setStretchFactor(0, 1)
+        split.setStretchFactor(1, 3)
+        v.addWidget(split, 1)
         self.summary = QLabel()
         self.summary.setWordWrap(True)
         v.addWidget(self.summary)
-        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        self.okbtn = bb.button(QDialogButtonBox.Ok)
-        self.okbtn.setText("Envoyer à la radio")
-        bb.accepted.connect(self.accept)
-        bb.rejected.connect(self.reject)
-        v.addWidget(bb)
-        self.update_summary()
+        self._search_timer = QTimer(self)
+        self._search_timer.setSingleShot(True)
+        self._search_timer.timeout.connect(self.refresh_table)
+        self._loaded = False
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        if not self._loaded:
+            self._loaded = True
+            cached = AB.load_cache()
+            if cached:
+                import datetime
+                d = datetime.datetime.fromtimestamp(cached[1]).strftime("%d/%m/%Y à %H:%M")
+                self._load(cached[0], f"Liste RadioID.net mise à jour le {d}")
+            else:
+                self.src.setText("Aucune liste sur ce PC : cliquez sur « Mettre à jour la liste ».")
+                self.update_summary()
+
+    def _saved_countries(self):
+        val = self.main.settings.value("ab_countries", "France")
+        return set(v for v in str(val).split("|") if v)
 
     def _load(self, entries, label):
         self.entries = entries
         nb = f"{len(entries):,}".replace(",", " ")
         self.src.setText(f"{label} : {nb} identifiants.")
+        keep = self._saved_countries()
         self.list.blockSignals(True)
         self.list.clear()
         for name, n in AB.countries(entries):
             it = QListWidgetItem(f"{name}  ({n})")
             it.setData(Qt.UserRole, name)
             it.setFlags(it.flags() | Qt.ItemIsUserCheckable)
-            it.setCheckState(Qt.Checked if name == "France" else Qt.Unchecked)
+            it.setCheckState(Qt.Checked if name in keep else Qt.Unchecked)
             self.list.addItem(it)
         self.list.blockSignals(False)
-        self.update_summary()
+        self.selection_changed()
 
     def download(self):
-        ok, res = TaskDialog.run(self, "Téléchargement RadioID.net", AB.download_radioid)
+        ok, res = TaskDialog.run(self.main, "Mise à jour de la liste RadioID.net", AB.download_radioid)
         if ok:
-            self._load(res, "RadioID.net")
+            import datetime
+            self._load(res, "Liste RadioID.net mise à jour le "
+                       + datetime.datetime.now().strftime("%d/%m/%Y à %H:%M"))
+            self.main.log(f"Liste RadioID.net mise à jour : {len(res)} identifiants.")
 
     def open_csv(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Base d'identifiants DMR", "",
+        path, _ = QFileDialog.getOpenFileName(self, "Base d'identifiants DMR", self.main.last_dir(),
                                               "CSV (*.csv *.txt);;Tous les fichiers (*)")
         if not path:
             return
@@ -402,40 +479,70 @@ class AddressBookDialog(QDialog):
             on = name == "Tous" or (keep is not None and it.data(Qt.UserRole) in keep)
             it.setCheckState(Qt.Checked if on else Qt.Unchecked)
         self.list.blockSignals(False)
-        self.update_summary()
+        self.selection_changed()
 
-    def apply_filter(self, text):
+    def filter_countries(self, text):
         q = text.strip().lower()
         for i in range(self.list.count()):
             it = self.list.item(i)
             it.setHidden(bool(q) and q not in it.text().lower())
 
-    def selected(self) -> list:
-        keep = {self.list.item(i).data(Qt.UserRole) for i in range(self.list.count())
+    def checked_countries(self) -> set:
+        return {self.list.item(i).data(Qt.UserRole) for i in range(self.list.count())
                 if self.list.item(i).checkState() == Qt.Checked}
+
+    def selected(self) -> list:
+        keep = self.checked_countries()
         return [e for e in self.entries if (e.country or "(inconnu)") in keep]
 
-    def update_summary(self, *_):
+    def selection_changed(self, *_):
+        if self.entries:
+            self.main.settings.setValue("ab_countries", "|".join(sorted(self.checked_countries())))
+        self.refresh_table()
+        self.update_summary()
+
+    def refresh_table(self):
+        rows = self.selected() if self.entries else []
+        q = self.search.text().strip().lower()
+        if q:
+            rows = [e for e in rows if q in e.callsign.lower() or q in e.name.lower()
+                    or q in e.city.lower() or q in str(e.dmr_id)]
+        self.model.set_rows(rows[:200000])
+
+    def update_summary(self):
         sel = self.selected() if self.entries else []
+        self.payload = b""
         if not sel:
-            self.payload = b""
             self.summary.setText("Sélectionnez au moins un pays.")
-            self.okbtn.setEnabled(False)
+            self.btn_send.setEnabled(False)
             return
         try:
             self.payload = AB.build_payload(sel)
         except RadioError as e:
-            self.payload = b""
             self.summary.setText(str(e))
-            self.okbtn.setEnabled(False)
+            self.btn_send.setEnabled(False)
             return
         n, minutes = AB.estimate(len(self.payload))
         nb = f"{len(sel):,}".replace(",", " ")
         ko = f"{len(self.payload) // 1024:,}".replace(",", " ")
-        self.summary.setText(f"<b>{nb} identifiants</b>, {ko} Ko — envoi estimé : environ "
-                             f"{max(1, round(minutes))} min. Le carnet actuel de la radio "
-                             f"sera remplacé.")
-        self.okbtn.setEnabled(True)
+        self.summary.setText(f"<b>{nb} identifiants</b> à envoyer, {ko} Ko — envoi estimé : environ "
+                             f"{max(1, round(minutes))} min. Le carnet actuel de la radio sera remplacé.")
+        self.btn_send.setEnabled(True)
+
+    def send(self):
+        port = self.main.port_name()
+        if not port or not self.payload:
+            return
+        if QMessageBox.question(self, "Carnet d'adresses",
+                                "Envoyer ce carnet à la radio ? (radio allumée normalement)") != QMessageBox.Yes:
+            return
+        self.main.settings.setValue("port", port)
+        ok, _ = TaskDialog.run(self.main, "Envoi du carnet d'adresses", AB.write_addressbook, port,
+                               self.payload)
+        if ok:
+            QMessageBox.information(self, "Carnet d'adresses",
+                                    "Carnet d'adresses envoyé. Redémarrez la radio si les noms "
+                                    "n'apparaissent pas tout de suite.")
 
 
 class UpdateMenuBar(QMenuBar):
@@ -500,13 +607,15 @@ class MainWindow(QMainWindow):
         self.t_st = SettingsTab()
         self.t_keys = KeysTab()
         self.t_start = StartupTab()
+        self.t_ab = AddressBookTab(self)
         self.logbox = QPlainTextEdit(readOnly=True)
         self.logbox.setFont(QFont("Monospace", 9))
         for t, name in ((self.t_ch, "Canaux"), (self.t_ct, "Contacts"), (self.t_gl, "Groupes RX"),
-                        (self.t_zn, "Zones"), (self.t_st, "Réglages"),
+                        (self.t_zn, "Zones"), (self.t_st, "ID DMR"),
                         (self.t_keys, "Réglages touches"), (self.t_start, "Menu démarrage")):
             self.tabs.addTab(t, name)
             t.changed.connect(self.mark_dirty)
+        self.tabs.addTab(self.t_ab, "Carnet adresse DMR")
         self.tabs.addTab(self.logbox, "Journal")
         self.tabs.currentChanged.connect(self.on_tab)
 
@@ -812,19 +921,7 @@ class MainWindow(QMainWindow):
         self.update_title()
 
     def address_book(self):
-        port = self.port_name()
-        if not port:
-            return
-        dlg = AddressBookDialog(self)
-        if dlg.exec() != QDialog.Accepted or not dlg.payload:
-            return
-        self.settings.setValue("port", port)
-        ok, _ = TaskDialog.run(self, "Envoi du carnet d'adresses", AB.write_addressbook, port,
-                               dlg.payload)
-        if ok:
-            QMessageBox.information(self, "Carnet d'adresses",
-                                    "Carnet d'adresses envoyé. Redémarrez la radio si les noms "
-                                    "n'apparaissent pas tout de suite.")
+        self.tabs.setCurrentWidget(self.t_ab)
 
     def backup_full(self):
         port = self.port_name()

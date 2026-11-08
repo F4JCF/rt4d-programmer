@@ -782,14 +782,15 @@ class SettingsTab(BaseTab):
     def __init__(self):
         super().__init__()
         root = QVBoxLayout(self)
-        box = QGroupBox("Identité de la radio")
+        box = QGroupBox("Identité DMR de la radio")
         f = QFormLayout(box)
         self.e_id = QSpinBox(minimum=0, maximum=16_777_215)
         self.e_name = QLineEdit(maxLength=16)
         self.e_msg = QLineEdit(maxLength=32)
         f.addRow("ID DMR de la radio", self.e_id)
         f.addRow("Nom / indicatif", self.e_name)
-        f.addRow("Message de démarrage", self.e_msg)
+        self.msg_label = QLabel("Message de démarrage")
+        f.addRow(self.msg_label, self.e_msg)
         root.addWidget(box)
         self.info = QLabel()
         self.info.setWordWrap(True)
@@ -807,12 +808,17 @@ class SettingsTab(BaseTab):
             self.e_id.setValue(s.radio_id)
             self.e_name.setText(s.radio_name)
             self.e_msg.setText(s.startup_message)
-        ok = self.cp.has_settings and self.cp.is_refw
+        ok = self.cp.has_settings and (self.cp.is_refw or self.cp.kind == "stock")
+        # firmware officiel : le message d'accueil se règle dans « Menu démarrage »
+        stock = self.cp.kind == "stock"
+        self.msg_label.setVisible(not stock)
+        self.e_msg.setVisible(not stock)
         self.setEnabled(True)
         for w in (self.e_id, self.e_name, self.e_msg):
             w.setEnabled(ok)
         self.info.setText(
-            "Les autres réglages de la radio (menus, touches, audio…) sont conservés tels quels."
+            "L'ID DMR est celui attribué par RadioID.net (7 chiffres pour la France : 208xxxx). "
+            "Les autres réglages de la radio sont conservés tels quels."
             if ok else
             "Réglages indisponibles : ce codeplug ne contient pas de réglages REFW valides. "
             "Lisez la radio pour les obtenir.")

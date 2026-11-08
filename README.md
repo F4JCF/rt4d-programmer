@@ -16,7 +16,7 @@ Ce logiciel programme le talkie-walkie **Radtel RT-4D** sous **Windows et Linux*
 - **Sauvegarde automatique** : avant chaque écriture, le logiciel relit la radio et enregistre son contenu dans un fichier `.4rdmf`.
 - **Réglages des touches** (firmware officiel) : action des touches latérales, de la touche alarme et des appuis longs 0 à 9, parmi les 41 fonctions proposées par Radtel.
 - **Menu démarrage** (firmware officiel) : message d'accueil et sa position, logo, bip, mode de travail et zone des voies A/B à l'allumage, affichage (nom, fréquence ou canal), luminosité, rétroéclairage, contraste, sons et voyants.
-- **Carnet d'adresses DMR** : téléchargement de la base RadioID.net (ou import d'un CSV) et choix des pays, puis envoi à la radio, qui affiche l'indicatif et le nom des correspondants.
+- **Onglet « Carnet adresse DMR »** : bouton de mise à jour de la liste RadioID.net (gardée sur le PC), recherche, choix des pays, puis envoi à la radio, qui affiche l'indicatif et le nom des correspondants.
 - **Sauvegarde complète de la flash** (4 Mo) et **restauration**. Par défaut, la calibration est préservée.
 - **Flash du firmware** pour mettre à jour la radio ou revenir à une version antérieure. Il accepte directement le paquet officiel Radtel (le zip « RT-4D Upgrade Vx_xx_xxxxxx.zip » ou le .exe qu'il contient) : le firmware y est extrait sans lancer l'outil Radtel, puis flashé avec la même procédure que celle-ci. Un fichier `.bin` (REFW…) est aussi accepté.
 - **Import et export CSV** des canaux et des contacts. Le séparateur « ; » s'ouvre directement dans Excel ou LibreOffice.

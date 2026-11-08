@@ -102,9 +102,43 @@ def load_csv(path: str) -> list[Entry]:
     raise RadioError("Encodage du fichier non reconnu.")
 
 
+def cache_path() -> str:
+    """Copie locale de la base (gardée entre deux lancements du logiciel)."""
+    import os
+    import sys
+    if sys.platform.startswith("win"):
+        base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+    else:
+        base = os.environ.get("XDG_DATA_HOME") or os.path.join(os.path.expanduser("~"), ".local", "share")
+    d = os.path.join(base, "RT4D-Programmer")
+    os.makedirs(d, exist_ok=True)
+    return os.path.join(d, "carnet-dmr.csv")
+
+
+def load_cache() -> Optional[tuple[list[Entry], float]]:
+    """(entrées, date de mise à jour) de la base gardée sur le PC, ou None."""
+    import os
+    p = cache_path()
+    if not os.path.exists(p):
+        return None
+    try:
+        return load_csv(p), os.path.getmtime(p)
+    except Exception:
+        return None
+
+
+def save_cache(raw: bytes):
+    import os
+    p = cache_path()
+    tmp = p + ".tmp"
+    with open(tmp, "wb") as f:
+        f.write(raw)
+    os.replace(tmp, p)
+
+
 def download_radioid(progress: Progress = None, cancel: CancelCheck = None,
                      log: Callable[[str], None] = print) -> list[Entry]:
-    """Télécharge la base mondiale sur RadioID.net (environ 15 à 20 Mo)."""
+    """Télécharge la base mondiale sur RadioID.net (environ 15 à 20 Mo) et la garde sur le PC."""
     import ssl
     import urllib.request
     try:
@@ -133,7 +167,9 @@ def download_radioid(progress: Progress = None, cancel: CancelCheck = None,
         raise RadioError(f"Téléchargement impossible : {e}\n\nVous pouvez télécharger le fichier "
                          f"vous-même ({RADIOID_URL}) puis l'ouvrir avec « Ouvrir un CSV ».") from e
     log(f"{len(buf) // 1024} Ko reçus, analyse…")
-    return parse_csv_text(buf.decode("utf-8-sig", "replace"))
+    entries = parse_csv_text(buf.decode("utf-8-sig", "replace"))
+    save_cache(bytes(buf))
+    return entries
 
 
 def countries(entries: Iterable[Entry]) -> list[tuple[str, int]]:
