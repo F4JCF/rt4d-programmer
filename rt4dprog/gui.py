@@ -1221,7 +1221,7 @@ class MainWindow(QMainWindow):
 
     # -- sauvegarde Nextcloud --
     def backup_dialog(self):
-        from .backup import BackupDialog
+        from .backup_dialog import BackupDialog
         BackupDialog(self).exec()
 
     def open_backup_dir(self):
