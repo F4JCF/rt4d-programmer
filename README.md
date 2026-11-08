@@ -67,7 +67,7 @@ python -m pytest tests        # tests avec une radio simulée
 python main.py
 ```
 
-Les exécutables sont compilés par GitHub Actions (`.github/workflows/build.yml`) à chaque envoi sur `main`. Pour publier une version, créez un tag `vX.Y.Z`.
+Les exécutables sont compilés par GitHub Actions (`.github/workflows/build.yml`) à chaque envoi sur `main`. La publication est automatique : quand le numéro de version de `rt4dprog/__init__.py` change, le tag `vX.Y.Z` et la release sont créés avec les zips Windows et Linux.
 
 ## Licence
 

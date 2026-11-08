@@ -69,17 +69,42 @@ jobs:
           path: ${{ matrix.name }}.zip
 
   release:
-    if: startsWith(github.ref, 'refs/tags/v')
+    # Publication automatique : à chaque envoi sur main, si la version indiquée dans
+    # rt4dprog/__init__.py n'a pas encore de release, le tag vX.Y.Z et la release
+    # sont créés avec les deux zips. Un tag poussé à la main fonctionne aussi.
+    if: github.event_name == 'push'
     needs: build
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+      - name: Version
+        id: v
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+          else
+            TAG="v$(sed -n 's/^__version__ = "\(.*\)"/\1/p' rt4dprog/__init__.py)"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1 && [[ "$GITHUB_REF" != refs/tags/v* ]]; then
+            echo "publish=no" >> "$GITHUB_OUTPUT"
+            echo "La release $TAG existe déjà : rien à publier."
+          else
+            echo "publish=yes" >> "$GITHUB_OUTPUT"
+          fi
       - uses: actions/download-artifact@v4
+        if: steps.v.outputs.publish == 'yes'
         with:
           path: dl
       - uses: softprops/action-gh-release@v2
+        if: steps.v.outputs.publish == 'yes'
         with:
+          tag_name: ${{ steps.v.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: RT4D Programmer ${{ steps.v.outputs.tag }}
           files: dl/*/*.zip
-          name: RT4D Programmer ${{ github.ref_name }}
           body: |
             Téléchargez le zip correspondant à votre système, décompressez-le et lancez le programme.
             Windows : RT4D-Programmer.exe — Linux : RT4D-Programmer (rendez-le exécutable si besoin).
