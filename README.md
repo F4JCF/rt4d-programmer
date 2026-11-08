@@ -33,6 +33,8 @@ Téléchargez le zip de votre système dans la page **Releases** du dépôt (ou 
 
 Le câble USB du RT-4D crée un port COM (Windows) ou `/dev/ttyUSB0` / `/dev/ttyACM0` (Linux).
 
+Ensuite, le logiciel vérifie au démarrage s'il existe une nouvelle version. Si c'est le cas, un bouton vert apparaît en haut à droite : un clic affiche les nouveautés et installe la mise à jour, puis le logiciel redémarre. La vérification se désactive dans le menu Aide.
+
 ## Utilisation
 
 1. Allumez la radio **normalement**, câble branché, puis choisissez le port.

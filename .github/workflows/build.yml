@@ -95,6 +95,18 @@ jobs:
           else
             echo "publish=yes" >> "$GITHUB_OUTPUT"
           fi
+      - name: Notes de version (message du dernier commit)
+        if: steps.v.outputs.publish == 'yes'
+        run: |
+          {
+            echo "## Nouveautés"
+            git log -1 --pretty=%B | grep -v -E '^(Co-Authored-By|Claude-Session):' | sed '/^$/N;/^\n$/D'
+            echo
+            echo "Téléchargez le zip correspondant à votre système, décompressez-le et lancez le programme."
+            echo "Windows : RT4D-Programmer.exe — Linux : RT4D-Programmer."
+            echo "Les versions déjà installées proposent la mise à jour automatiquement."
+          } > notes.md
+          cat notes.md
       - uses: actions/download-artifact@v4
         if: steps.v.outputs.publish == 'yes'
         with:
@@ -106,6 +118,4 @@ jobs:
           target_commitish: ${{ github.sha }}
           name: RT4D Programmer ${{ steps.v.outputs.tag }}
           files: dl/*/*.zip
-          body: |
-            Téléchargez le zip correspondant à votre système, décompressez-le et lancez le programme.
-            Windows : RT4D-Programmer.exe — Linux : RT4D-Programmer (rendez-le exécutable si besoin).
+          body_path: notes.md

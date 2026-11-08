@@ -407,3 +407,21 @@ def test_addressbook_radtel_format():
     txt = "No,Radio ID,Callsign,Name,City,State,Country,Remarks\n1,2080845,F4JCF,Jean Marie,Mougins,PACA,France,\n"
     e = AB.parse_csv_text(txt)
     assert e[0].dmr_id == 2080845 and e[0].name == "Jean Marie"
+
+
+# ───────────────────────── mise à jour ─────────────────────────
+
+from rt4dprog import updater
+
+
+def test_versions():
+    assert updater.parse_version("v0.10.0") > updater.parse_version("0.9.9")
+    assert updater.is_newer("v1.0", "0.3.0") and not updater.is_newer("v0.3.0", "0.3.0")
+
+
+def test_install_binary(tmp_path):
+    exe = tmp_path / "RT4D-Programmer"
+    exe.write_bytes(b"\x7fELF ancienne")
+    updater.install_binary(b"\x7fELF nouvelle", str(exe), log=lambda m: None)
+    assert exe.read_bytes() == b"\x7fELF nouvelle" and os.access(exe, os.X_OK)
+    assert not (tmp_path / "RT4D-Programmer.nouveau").exists()
