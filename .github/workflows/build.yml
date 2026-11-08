@@ -1,0 +1,85 @@
+name: Compilation Windows + Linux
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  tests:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt pytest
+      - run: python -m pytest -q tests
+
+  build:
+    needs: tests
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            name: RT4D-Programmer-Windows
+            exe: RT4D-Programmer.exe
+          - os: ubuntu-22.04
+            name: RT4D-Programmer-Linux
+            exe: RT4D-Programmer
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Dépendances
+        run: pip install -r requirements.txt pyinstaller
+      - name: Compilation PyInstaller
+        shell: bash
+        run: >
+          pyinstaller --noconfirm --onefile --windowed
+          --name RT4D-Programmer
+          --icon icon.ico
+          --add-data "icon.png:."
+          --collect-submodules serial.tools
+          main.py
+      - name: Paquet
+        shell: bash
+        run: |
+          mkdir out
+          cp "dist/${{ matrix.exe }}" out/
+          cp README.md LICENSE NOTICE out/
+          cd out
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            7z a "../${{ matrix.name }}.zip" . > /dev/null
+          else
+            chmod +x "${{ matrix.exe }}"
+            zip -r "../${{ matrix.name }}.zip" .
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: ${{ matrix.name }}.zip
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dl
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dl/*/*.zip
+          name: RT4D Programmer ${{ github.ref_name }}
+          body: |
+            Téléchargez le zip correspondant à votre système, décompressez-le et lancez le programme.
+            Windows : RT4D-Programmer.exe — Linux : RT4D-Programmer (rendez-le exécutable si besoin).

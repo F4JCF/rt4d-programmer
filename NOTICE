@@ -1,0 +1,18 @@
+RT4D Programmer
+Copyright (C) 2026 Jean-Marie Bouthors (F4JCF)
+Distribué sous licence GNU GPL v3 (voir LICENSE).
+
+Ce logiciel contient une réécriture en Python du protocole série publié par
+Dual Tachyon dans les projets suivants, sous licence Apache 2.0 :
+  - RT-4D-SPIFlash-CLI          https://github.com/DualTachyon/rt-4d-spiflash-cli
+  - radtel-rt-4d-flasher-cli    https://github.com/DualTachyon/radtel-rt-4d-flasher-cli
+  Copyright 2025 Dual Tachyon
+  Licensed under the Apache License, Version 2.0
+  http://www.apache.org/licenses/LICENSE-2.0
+
+La description de la carte mémoire du codeplug REFW (beta 41+) s'appuie sur
+la documentation technique du projet RT4D Editor (jcalado/rt4d-cps). Aucun
+code de ce projet n'a été copié.
+
+Radtel et RT-4D sont des marques de leurs propriétaires respectifs. Ce
+logiciel n'est ni affilié à Radtel, ni approuvé par Radtel.
