@@ -51,23 +51,35 @@ jobs:
           --collect-submodules serial.tools
           --collect-data certifi
           main.py
+      - name: Installateur Windows (Inno Setup)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $v = (Select-String -Path rt4dprog/__init__.py -Pattern '__version__ = "(.+)"').Matches[0].Groups[1].Value
+          if (-not (Get-Command iscc -ErrorAction SilentlyContinue)) { choco install innosetup -y --no-progress }
+          $iscc = (Get-Command iscc -ErrorAction SilentlyContinue).Source
+          if (-not $iscc) { $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
+          & $iscc "/DMyVersion=$v" installer.iss
       - name: Paquet
         shell: bash
         run: |
-          mkdir out
+          mkdir out rel
           cp "dist/${{ matrix.exe }}" out/
           cp README.md LICENSE NOTICE out/
-          cd out
           if [ "$RUNNER_OS" = "Windows" ]; then
-            7z a "../${{ matrix.name }}.zip" . > /dev/null
+            cp dist/RT4D-Programmer.exe rel/RT4D-Programmer.exe
+            cp dist/RT4D-Programmer-Setup-*.exe rel/
+            (cd out && 7z a "../rel/${{ matrix.name }}.zip" . > /dev/null)
           else
-            chmod +x "${{ matrix.exe }}"
-            zip -r "../${{ matrix.name }}.zip" .
+            chmod +x "out/${{ matrix.exe }}"
+            cp out/RT4D-Programmer rel/RT4D-Programmer-Linux
+            (cd out && zip -r "../rel/${{ matrix.name }}.zip" .)
           fi
+          ls -l rel
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.name }}
-          path: ${{ matrix.name }}.zip
+          path: rel/*
 
   release:
     # Publication automatique : à chaque envoi sur main, si la version indiquée dans
@@ -102,9 +114,9 @@ jobs:
             echo "## Nouveautés"
             git log -1 --pretty=%B | grep -v -E '^(Co-Authored-By|Claude-Session):' | sed '/^$/N;/^\n$/D'
             echo
-            echo "Téléchargez le zip correspondant à votre système, décompressez-le et lancez le programme."
-            echo "Windows : RT4D-Programmer.exe — Linux : RT4D-Programmer."
-            echo "Les versions déjà installées proposent la mise à jour automatiquement."
+            echo "Windows : installez avec RT4D-Programmer-Setup (ou lancez directement RT4D-Programmer.exe)."
+            echo "Linux : RT4D-Programmer-Linux (rendez-le exécutable)."
+            echo "Les versions déjà installées proposent la mise à jour automatiquement (menu « Mise à jour »)."
           } > notes.md
           cat notes.md
       - uses: actions/download-artifact@v4
@@ -117,5 +129,5 @@ jobs:
           tag_name: ${{ steps.v.outputs.tag }}
           target_commitish: ${{ github.sha }}
           name: RT4D Programmer ${{ steps.v.outputs.tag }}
-          files: dl/*/*.zip
+          files: dl/*/*
           body_path: notes.md

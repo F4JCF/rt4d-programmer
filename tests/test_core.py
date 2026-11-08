@@ -409,7 +409,7 @@ def test_addressbook_radtel_format():
     assert e[0].dmr_id == 2080845 and e[0].name == "Jean Marie"
 
 
-# ───────────────────────── mise à jour ─────────────────────────
+# ───────────────────────── mise à jour (méthode CAT Pilot) ─────────────────────────
 
 from rt4dprog import updater
 
@@ -419,12 +419,41 @@ def test_versions():
     assert updater.is_newer("v1.0", "0.3.0") and not updater.is_newer("v0.3.0", "0.3.0")
 
 
-def test_install_binary(tmp_path):
-    exe = tmp_path / "RT4D-Programmer"
-    exe.write_bytes(b"\x7fELF ancienne")
-    updater.install_binary(b"\x7fELF nouvelle", str(exe), log=lambda m: None)
-    assert exe.read_bytes() == b"\x7fELF nouvelle" and os.access(exe, os.X_OK)
-    assert not (tmp_path / "RT4D-Programmer.nouveau").exists()
+def _serve(tmp_path, content):
+    import http.server, threading, functools
+    (tmp_path / "f.bin").write_bytes(content)
+    handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(tmp_path))
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv, f"http://127.0.0.1:{srv.server_address[1]}/f.bin"
+
+
+def test_update_download_sha256(tmp_path, monkeypatch):
+    import hashlib
+    monkeypatch.setattr(updater.tempfile, "gettempdir", lambda: str(tmp_path))
+    monkeypatch.setattr(updater, "_urlopen", lambda req, timeout: updater.urllib.request.urlopen(req, timeout=timeout))
+    exe = b"\x7fELF" + b"x" * 5000 if not sys.platform.startswith("win") else b"MZ" + b"x" * 5000
+    srv, url = _serve(tmp_path, exe)
+    try:
+        u = updater.Updater()
+        ok = u._download_once({"version": "9.9.9", "url": url, "size": len(exe),
+                               "sha256": hashlib.sha256(exe).hexdigest()})
+        assert open(ok, "rb").read() == exe
+        with pytest.raises(RuntimeError, match="empreinte"):
+            u._download_once({"version": "9.9.8", "url": url, "size": len(exe), "sha256": "00" * 32})
+    finally:
+        srv.shutdown()
+
+
+def test_install_and_restart_linux(monkeypatch, tmp_path):
+    cmds = []
+    monkeypatch.setattr(updater, "spawn_detached", lambda c: cmds.append(c))
+    monkeypatch.setattr(updater.sys, "platform", "linux")
+    monkeypatch.setattr(updater.sys, "executable", str(tmp_path / "RT4D-Programmer"))
+    new = tmp_path / "new"
+    new.write_bytes(b"\x7fELF")
+    updater.install_and_restart(str(new))
+    assert cmds and "mv -f" in cmds[0][2] and str(tmp_path / "RT4D-Programmer") in cmds[0][2]
 
 
 def test_stock_keys(stock_radio, tmp_path):
@@ -480,32 +509,6 @@ REAL_UPG = ("/home/claude/fw_in/RT-4D 20260205 Upgrade/RT-4D 20260205 Upgrade/"
 def test_real_radtel_package():
     fw = FW.load_firmware(REAL_UPG)
     assert fw.official and fw.used_bytes == 155740 and "V3.25" in fw.label
-
-
-def test_update_download_retries(monkeypatch, tmp_path):
-    import io as _io
-    calls = []
-    zbuf = _io.BytesIO()
-    with zipfile.ZipFile(zbuf, "w") as zf:
-        zf.writestr("RT4D-Programmer", b"\x7fELF nouvelle version")
-    payload = zbuf.getvalue()
-
-    def fake(url, headers, expected, progress, cancel, opener=None):
-        calls.append(url)
-        if len(calls) < 3:
-            raise IOError("HTTP Error 504: Gateway Time-out")
-        return payload
-    monkeypatch.setattr(updater, "_download", fake)
-    monkeypatch.setattr(updater.time, "sleep", lambda s: None)
-    monkeypatch.setattr(updater, "can_self_update", lambda: True)
-    target = tmp_path / "RT4D-Programmer"
-    target.write_bytes(b"\x7fELF ancienne")
-    monkeypatch.setattr(updater.sys, "executable", str(target))
-    monkeypatch.setattr(updater.sys, "platform", "linux")
-    rel = updater.Release("9.9.9", "", "https://a", 0, "https://p", "https://api")
-    updater.download_and_install(rel, log=lambda m: None)
-    assert calls == ["https://a", "https://a", "https://api"]   # direct, proxy, direct
-    assert target.read_bytes() == b"\x7fELF nouvelle version"
 
 
 def test_stock_startup(stock_radio, tmp_path):

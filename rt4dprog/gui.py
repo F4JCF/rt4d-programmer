@@ -8,8 +8,8 @@ import traceback
 
 from PySide6.QtCore import QObject, QSettings, Qt, QThread, QTimer, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
-from PySide6.QtGui import QAction, QFont, QIcon, QKeySequence
-from PySide6.QtWidgets import (QApplication, QCheckBox, QSizePolicy, QToolButton, QComboBox, QDialog, QDialogButtonBox,
+from PySide6.QtGui import QAction, QColor, QFont, QIcon, QKeySequence, QPainter
+from PySide6.QtWidgets import (QApplication, QCheckBox, QMenuBar, QProgressDialog, QComboBox, QDialog, QDialogButtonBox,
                                QFileDialog, QFormLayout, QHBoxLayout, QLabel, QLineEdit,
                                QListWidget, QListWidgetItem,
                                QMainWindow, QMessageBox, QPlainTextEdit, QProgressBar,
@@ -438,16 +438,32 @@ class AddressBookDialog(QDialog):
         self.okbtn.setEnabled(True)
 
 
-class UpdateCheck(QThread):
-    """Vérification silencieuse des mises à jour en arrière-plan."""
-    found = Signal(object)          # Release ou None
-    failed = Signal(str)
+class UpdateMenuBar(QMenuBar):
+    """Barre de menus : le titre « Mise à jour » passe en orange (gras) quand une version est disponible."""
+    ORANGE = QColor("#ff8c1a")
 
-    def run(self):
-        try:
-            self.found.emit(updater.check_latest())
-        except Exception as e:
-            self.failed.emit(str(e))
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.highlight_menu = None
+
+    def paintEvent(self, e):
+        super().paintEvent(e)
+        menu = self.highlight_menu
+        if menu is None:
+            return
+        act = menu.menuAction()
+        r = self.actionGeometry(act)
+        if r.isEmpty():
+            return
+        p = QPainter(self)
+        active = self.activeAction() is act
+        p.fillRect(r, QColor(255, 140, 26, 70) if active else self.palette().color(self.backgroundRole()))
+        f = QFont(self.font())
+        f.setBold(True)
+        p.setFont(f)
+        p.setPen(self.ORANGE)
+        p.drawText(r, Qt.AlignCenter, menu.title().replace("&", ""))
+        p.end()
 
 
 # ───────────────────────────── fenêtre principale ─────────────────────────────
@@ -456,6 +472,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.settings = QSettings("F4JCF", "RT4D-Programmer")
+        self.setMenuBar(UpdateMenuBar(self))
         self.cp = Codeplug()
         self.path: str | None = None
         self.dirty = False
@@ -503,20 +520,19 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
 
         self._menus(tb)
-        spacer = QWidget()
-        spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        tb.addWidget(spacer)
-        self.update_btn = QToolButton()
-        self.update_btn.setStyleSheet("QToolButton { background: #1e7e34; color: white; "
-                                      "font-weight: bold; padding: 3px 10px; border-radius: 4px; }")
-        self.update_btn.clicked.connect(self.install_update)
-        self.update_action = tb.addWidget(self.update_btn)
-        self.update_action.setVisible(False)
-        self.pending_release = None
-        self.update_thread = None
         updater.cleanup_old()
-        if self.settings.value("auto_update", True, type=bool):
-            QTimer.singleShot(1500, lambda: self.check_update(silent=True))
+        self.upd = updater.Updater()
+        self.upd.checked.connect(self.on_update_checked)
+        self.upd.progress.connect(self.on_update_progress)
+        self.upd.downloaded.connect(self.on_update_downloaded)
+        self._upd_dialog = None
+        self._silent_check = False
+        if self.act_upd_start.isChecked():
+            QTimer.singleShot(4000, lambda: self.upd.check(manual=False))
+        # vérification discrète toutes les 6 heures : « Mise à jour » passe en orange sans fenêtre
+        self._upd_timer = QTimer(self)
+        self._upd_timer.timeout.connect(self._periodic_update_check)
+        self._upd_timer.start(6 * 3600 * 1000)
         self.refresh_ports()
         self.load_codeplug(self.cp, None)
         self.log(f"{APP_NAME} {__version__} prêt.")
@@ -562,13 +578,17 @@ class MainWindow(QMainWindow):
         m = self.menuBar().addMenu("&Aide")
         self._act(m, "Mode d'emploi", self.show_help, "F1")
         m.addSeparator()
-        self._act(m, "Rechercher une mise à jour", lambda: self.check_update(silent=False))
-        a = QAction("Vérifier les mises à jour au démarrage", self, checkable=True)
-        a.setChecked(self.settings.value("auto_update", True, type=bool))
-        a.toggled.connect(lambda on: self.settings.setValue("auto_update", on))
-        m.addAction(a)
-        m.addSeparator()
         self._act(m, "À propos", self.about)
+
+        # Mise à jour, à côté de « Aide » (comme CAT Pilot)
+        self.menu_upd = self.menuBar().addMenu("Mise à jour")
+        self._act(self.menu_upd, "Vérifier les mises à jour…", lambda: self.upd.check(manual=True))
+        self.act_upd_start = QAction("Vérifier au démarrage", self, checkable=True)
+        self.act_upd_start.setChecked(self.settings.value("update_check", "true") == "true")
+        self.act_upd_start.toggled.connect(
+            lambda on: self.settings.setValue("update_check", "true" if on else "false"))
+        self.menu_upd.addAction(self.act_upd_start)
+        self._act(self.menu_upd, "Voir toutes les versions sur GitHub", self.open_releases_page)
 
     # -- utilitaires --
     def log(self, msg: str):
@@ -856,76 +876,100 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Firmware", "Firmware flashé avec succès.\n\nÉteignez puis "
                                     "rallumez la radio normalement.")
 
-    # -- mises à jour --
-    def check_update(self, silent: bool):
-        if self.update_thread and self.update_thread.isRunning():
-            return
-        self.update_thread = UpdateCheck(self)
+    # -- mises à jour (même fonctionnement que CAT Pilot) --
+    def set_update_flag(self, available, version=""):
+        """Titre « Mise à jour » en orange tant qu'une nouvelle version attend."""
+        self.menuBar().highlight_menu = self.menu_upd if available else None
+        self.menu_upd.menuAction().setToolTip(f"Nouvelle version disponible : {version}" if available else "")
+        self.menuBar().update()
 
-        def found(rel):
-            if rel:
-                self.pending_release = rel
-                self.update_btn.setText(f"⬆  Mise à jour {rel.version} disponible")
-                self.update_btn.setToolTip("Cliquez pour voir les nouveautés et installer")
-                self.update_action.setVisible(True)
-                self.log(f"Nouvelle version disponible : {rel.version}")
-                if not silent:
-                    self.install_update()
-            elif not silent:
-                QMessageBox.information(self, "Mise à jour",
-                                        f"Vous utilisez la dernière version ({__version__}).")
+    def _periodic_update_check(self):
+        if self.act_upd_start.isChecked():
+            self._silent_check = True
+            self.upd.check(manual=False)
 
-        def failed(msg):
-            self.log(f"Vérification des mises à jour impossible : {msg}")
-            if not silent:
+    def open_releases_page(self):
+        QDesktopServices.openUrl(QUrl(updater.PAGE))
+
+    def on_update_checked(self, info, manual):
+        silent, self._silent_check = self._silent_check, False
+        if isinstance(info, Exception):
+            self.log(f"Vérification des mises à jour impossible : {info}")
+            if manual:
                 QMessageBox.warning(self, "Mise à jour",
-                                    f"Impossible de vérifier les mises à jour :\n{msg}")
-
-        self.update_thread.found.connect(found)
-        self.update_thread.failed.connect(failed)
-        self.update_thread.start()
-
-    def install_update(self):
-        rel = self.pending_release
-        if not rel:
+                                    f"Impossible de vérifier les mises à jour.\n\n{info}")
             return
-        notes = rel.notes.strip() or "(pas de description)"
+        if not updater.is_newer(info["version"]):
+            self.set_update_flag(False)
+            if manual:
+                QMessageBox.information(self, "Mise à jour",
+                                        f"Vous avez déjà la dernière version ({__version__}).")
+            return
+        self.set_update_flag(True, info["version"])
+        self.log(f"Nouvelle version disponible : {info['version']}")
+        if silent and not manual:
+            return
+        if not manual and self.settings.value("update_skip", "") == info["version"]:
+            return
+        notes = info["notes"].strip()
+        if len(notes) > 900:
+            notes = notes[:900] + "…"
         box = QMessageBox(self)
         box.setWindowTitle("Mise à jour disponible")
-        box.setIcon(QMessageBox.Information)
-        box.setText(f"<b>Version {rel.version} disponible</b> (vous avez la {__version__}).")
-        box.setInformativeText("Installer maintenant ? Le logiciel redémarrera automatiquement."
-                               if updater.can_self_update() else
-                               "Ouvrir la page de téléchargement ?")
-        box.setDetailedText(notes)
-        box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
-        box.button(QMessageBox.Yes).setText("Installer" if updater.can_self_update() else "Ouvrir")
-        box.button(QMessageBox.No).setText("Plus tard")
-        if box.exec() != QMessageBox.Yes:
+        box.setText(f"<b>RT4D Programmer {info['version']}</b> est disponible "
+                    f"(vous avez la {__version__}).")
+        box.setInformativeText((notes + "\n\n" if notes else "") +
+                               ("Le logiciel sera fermé, mis à jour puis relancé automatiquement."
+                                if updater.can_self_update() and info.get("url") else
+                                "La page de téléchargement va s'ouvrir."))
+        b_now = box.addButton("Mettre à jour maintenant", QMessageBox.AcceptRole)
+        box.addButton("Plus tard", QMessageBox.RejectRole)
+        b_skip = box.addButton("Ignorer cette version", QMessageBox.DestructiveRole) if not manual else None
+        box.setDefaultButton(b_now)
+        box.exec()
+        if b_skip is not None and box.clickedButton() is b_skip:
+            self.settings.setValue("update_skip", info["version"])
             return
-        if not updater.can_self_update():
-            QDesktopServices.openUrl(QUrl(rel.page))
+        if box.clickedButton() is not b_now:
+            return
+        if not updater.can_self_update() or not info.get("url"):
+            self.open_releases_page()
             return
         if not self.confirm_discard():
             return
+        self._upd_dialog = QProgressDialog(f"Téléchargement de RT4D Programmer {info['version']}…",
+                                           "Annuler", 0, 100, self)
+        self._upd_dialog.setWindowTitle("Mise à jour")
+        self._upd_dialog.setWindowModality(Qt.WindowModal)
+        self._upd_dialog.setMinimumDuration(0)
+        self._upd_dialog.canceled.connect(self.upd.cancel)
+        self._upd_dialog.setValue(0)
+        self.upd.download(info)
 
-        def job(progress=None, cancel=None, log=None):
-            return updater.download_and_install(rel, progress, cancel, log)
-        dlg = TaskDialog(self, f"Mise à jour vers la version {rel.version}", job)
-        dlg.exec()
-        ok, path = dlg.ok, dlg.result_value
-        if not ok:
-            if QMessageBox.question(self, "Mise à jour",
-                                    f"{path}\n\nOuvrir la page de téléchargement dans le "
-                                    "navigateur ?") == QMessageBox.Yes:
-                QDesktopServices.openUrl(QUrl(rel.page))
+    def on_update_progress(self, done, total):
+        dlg = self._upd_dialog
+        if dlg and total:
+            dlg.setLabelText(f"Téléchargement… {done / 1e6:.1f} / {total / 1e6:.1f} Mo")
+            dlg.setValue(min(99, int(done * 100 / total)))
+
+    def on_update_downloaded(self, path):
+        if self._upd_dialog:
+            self._upd_dialog.reset()
+            self._upd_dialog = None
+        if isinstance(path, Exception):
+            if "annulé" not in str(path):
+                if QMessageBox.question(self, "Mise à jour",
+                                        f"Le téléchargement a échoué.\n\n{path}\n\n"
+                                        "Ouvrir la page de téléchargement ?") == QMessageBox.Yes:
+                    self.open_releases_page()
             return
         try:
-            updater.restart(path)
+            updater.install_and_restart(path)
         except Exception as e:
-            QMessageBox.information(self, "Mise à jour",
-                                    f"Mise à jour installée. Relancez le logiciel.\n({e})")
+            QMessageBox.warning(self, "Mise à jour", f"L'installation n'a pas pu démarrer.\n\n{e}")
+            return
         self.dirty = False
+        self.log("Mise à jour : redémarrage de RT4D Programmer…")
         QApplication.quit()
 
     def show_help(self):

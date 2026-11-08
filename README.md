@@ -24,10 +24,10 @@ Ce logiciel programme le talkie-walkie **Radtel RT-4D** sous **Windows et Linux*
 
 ## Installation
 
-Téléchargez le zip de votre système dans la page **Releases** du dépôt (ou dans l'onglet **Actions**, dernière compilation, rubrique *Artifacts*), décompressez-le et lancez :
+Dans la page **Releases** du dépôt :
 
-- Windows : `RT4D-Programmer.exe`. Si SmartScreen affiche un avertissement, cliquez sur « Informations complémentaires » puis « Exécuter quand même ».
-- Linux : `./RT4D-Programmer`. Il peut être nécessaire de lancer une fois :
+- Windows : `RT4D-Programmer-Setup-x.y.z.exe` installe le logiciel dans votre profil (sans droits administrateur), avec un raccourci. Vous pouvez aussi lancer directement `RT4D-Programmer.exe`. Si SmartScreen affiche un avertissement, cliquez sur « Informations complémentaires » puis « Exécuter quand même ».
+- Linux : `RT4D-Programmer-Linux` (rendez-le exécutable). Il peut être nécessaire de lancer une fois :
   ```
   sudo usermod -aG dialout $USER      # accès au port série (fermez puis rouvrez la session)
   sudo apt install libxcb-cursor0     # nécessaire à l'interface Qt sur certaines distributions
@@ -35,7 +35,7 @@ Téléchargez le zip de votre système dans la page **Releases** du dépôt (ou 
 
 Le câble USB du RT-4D crée un port COM (Windows) ou `/dev/ttyUSB0` / `/dev/ttyACM0` (Linux).
 
-Ensuite, le logiciel vérifie au démarrage s'il existe une nouvelle version. Si c'est le cas, un bouton vert apparaît en haut à droite : un clic affiche les nouveautés et installe la mise à jour, puis le logiciel redémarre. La vérification se désactive dans le menu Aide.
+Ensuite, les mises à jour fonctionnent comme dans CAT Pilot : au démarrage, une fenêtre propose « Mettre à jour maintenant », « Plus tard » ou « Ignorer cette version ». Le menu **Mise à jour** passe en orange tant qu'une version attend (vérification discrète toutes les 6 heures). Le nouvel exécutable est téléchargé, contrôlé par son empreinte SHA-256, puis remplace l'ancien à la fermeture du logiciel, qui redémarre tout seul.
 
 ## Utilisation
 
