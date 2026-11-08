@@ -490,7 +490,7 @@ def test_update_download_retries(monkeypatch, tmp_path):
         zf.writestr("RT4D-Programmer", b"\x7fELF nouvelle version")
     payload = zbuf.getvalue()
 
-    def fake(url, headers, expected, progress, cancel):
+    def fake(url, headers, expected, progress, cancel, opener=None):
         calls.append(url)
         if len(calls) < 3:
             raise IOError("HTTP Error 504: Gateway Time-out")
@@ -504,5 +504,5 @@ def test_update_download_retries(monkeypatch, tmp_path):
     monkeypatch.setattr(updater.sys, "platform", "linux")
     rel = updater.Release("9.9.9", "", "https://a", 0, "https://p", "https://api")
     updater.download_and_install(rel, log=lambda m: None)
-    assert calls == ["https://a", "https://api", "https://a"]
+    assert calls == ["https://a", "https://a", "https://api"]   # direct, proxy, direct
     assert target.read_bytes() == b"\x7fELF nouvelle version"

@@ -9,6 +9,7 @@ import ssl
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.request
 import zipfile
 from dataclasses import dataclass
@@ -41,6 +42,20 @@ def _ctx():
         return ssl.create_default_context()
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def _openers(follow: bool = True):
+    """Connexion directe d'abord, puis via le proxy éventuel du système."""
+    https = urllib.request.HTTPSHandler(context=_ctx())
+    extra = [] if follow else [_NoRedirect()]
+    direct = urllib.request.build_opener(urllib.request.ProxyHandler({}), https, *extra)
+    system = urllib.request.build_opener(https, *extra)
+    return [("directe", direct), ("proxy système", system)]
+
+
 def parse_version(v: str) -> tuple:
     v = v.strip().lstrip("vV")
     out = []
@@ -69,11 +84,45 @@ def can_self_update() -> bool:
     return os.access(os.path.dirname(os.path.abspath(sys.executable)), os.W_OK)
 
 
-def check_latest(timeout: float = 10) -> Optional[Release]:
-    """Retourne la dernière release si elle est plus récente, sinon None."""
+def _latest_from_api(opener, timeout) -> dict:
     req = urllib.request.Request(API_LATEST, headers=UA)
-    with urllib.request.urlopen(req, context=_ctx(), timeout=timeout) as r:
-        data = json.loads(r.read().decode("utf-8"))
+    with opener.open(req, timeout=timeout) as r:
+        return json.loads(r.read().decode("utf-8"))
+
+
+def _latest_from_redirect(opener, timeout) -> dict:
+    """Sans l'API : github.com/…/releases/latest redirige vers …/releases/tag/vX.Y.Z."""
+    req = urllib.request.Request(RELEASES_PAGE, headers={"User-Agent": UA["User-Agent"]})
+    try:
+        opener.open(req, timeout=timeout)
+        raise IOError("pas de redirection")
+    except urllib.error.HTTPError as e:
+        loc = e.headers.get("Location", "")
+        if e.code not in (301, 302, 303, 307, 308) or "/tag/" not in loc:
+            raise
+    tag = loc.rsplit("/tag/", 1)[1]
+    base = f"https://github.com/{REPO}/releases/download/{tag}/"
+    return {"tag_name": tag, "body": "", "html_url": loc,
+            "assets": [{"name": n, "browser_download_url": base + n, "size": 0, "url": None}
+                       for n in ("RT4D-Programmer-Windows.zip", "RT4D-Programmer-Linux.zip")]}
+
+
+def check_latest(timeout: float = 15) -> Optional[Release]:
+    """Retourne la dernière release si elle est plus récente, sinon None."""
+    errors = []
+    data = None
+    for how, fn, follow in (("API GitHub", _latest_from_api, True),
+                            ("page GitHub", _latest_from_redirect, False)):
+        for name, opener in _openers(follow):
+            try:
+                data = fn(opener, timeout)
+                break
+            except Exception as e:
+                errors.append(f"{how} ({name}) : {e}")
+        if data:
+            break
+    if data is None:
+        raise IOError("GitHub ne répond pas.\n" + "\n".join(errors))
     tag = data.get("tag_name", "")
     if not tag or not is_newer(tag):
         return None
@@ -87,10 +136,12 @@ def check_latest(timeout: float = 10) -> Optional[Release]:
                    api_asset_url=api_url)
 
 
-def _download(url: str, headers: dict, expected: int, progress: Progress, cancel: CancelCheck) -> bytes:
+def _download(url: str, headers: dict, expected: int, progress: Progress, cancel: CancelCheck,
+              opener=None) -> bytes:
     req = urllib.request.Request(url, headers=headers)
     buf = bytearray()
-    with urllib.request.urlopen(req, context=_ctx(), timeout=90) as r:
+    opener = opener or _openers()[0][1]
+    with opener.open(req, timeout=90) as r:
         total = int(r.headers.get("Content-Length") or expected or 0)
         while True:
             if cancel and cancel():
@@ -119,12 +170,14 @@ def download_and_install(rel: Release, progress: Progress = None, cancel: Cancel
     if rel.api_asset_url:
         sources.append((rel.api_asset_url, {"User-Agent": UA["User-Agent"],
                                             "Accept": "application/octet-stream"}))
+    openers = _openers()
+    plan = [(u, h, o) for u, h in sources for _, o in openers]
     buf = None
     last = None
-    for attempt in range(4):
-        url, headers = sources[attempt % len(sources)]
+    for attempt in range(max(4, len(plan))):
+        url, headers, opener = plan[attempt % len(plan)]
         try:
-            buf = _download(url, headers, rel.asset_size, progress, cancel)
+            buf = _download(url, headers, rel.asset_size, progress, cancel, opener)
             break
         except Cancelled:
             raise
