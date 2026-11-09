@@ -106,7 +106,7 @@ KEY_FUNCTIONS = [
     "Bip de fin d'émission (analogique)", "Radio FM", "Talkaround (sans relais)",
     "Alarme d'urgence", "Mesure de fréquence", "Décodage sous-ton à distance",
     "Envoi d'un ton (tone)", "Interrogation d'état", "Écoute à distance",
-    "DMR : neutralisation à distance (stun)", "DMR : destruction à distance (kill)",
+    "DMR : neutralisation à distance (stun)", "DMR : destruction à distance (kill) (Spectre F4JCF avec le firmware F4JCF)",
     "DMR : réactivation à distance", "Détection en ligne", "Affichage de l'appelé",
     "Bascule AM/FM (réception)", "Spectre analogique", "Niveau de squelch",
     "Pas de fréquence", "Bascule analogique/DMR", "Canal météo NOAA (Mode SATER avec le firmware F4JCF)",
