@@ -51,6 +51,7 @@ Ensuite, les mises à jour fonctionnent comme dans CAT Pilot : au démarrage, un
 ### Changer de firmware
 
 1. **Radio → Sauvegarde complète** (environ 6 minutes) : gardez ce fichier précieusement.
+   Pour une copie de **toute** la mémoire (16 Mo, environ 25 minutes, lecture seule) : **Radio → Sauvegarde de toute la mémoire**. Le fichier de 16 Mo s'utilise aussi pour Restaurer et pour la police (ses 4 premiers Mo).
 2. **Firmware → Flasher un firmware**, puis choisissez le `.bin`.
 3. Éteignez la radio. **Maintenez le PTT** et rallumez-la : l'écran reste éteint (mode bootloader).
 4. Cliquez sur « Flasher » et ne débranchez rien jusqu'à la fin, puis redémarrez la radio normalement.

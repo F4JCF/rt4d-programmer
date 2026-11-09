@@ -808,3 +808,19 @@ def test_accent_names():
         assert bytes(buf[:10]) == b"Role _x_ C"
     finally:
         C.ACCENTS = False
+
+
+def test_backup_16mb(radio, tmp_path):
+    """Sauvegarde de toute la mémoire (16 Mo) : lecture seule, et ses 4 premiers Mo servent partout."""
+    from rt4dprog.protocol import SPI_FULL_KB
+    radio.spi.extend(bytes((i * 7) & 0xFF for i in range(12 * 1024 * 1024)))   # flash 25Q128
+    p = str(tmp_path / "spi16.bin")
+    radio.writes.clear()
+    radio_ops.backup_spi("X", p, log=lambda m: None, size_kb=SPI_FULL_KB)
+    dump = open(p, "rb").read()
+    assert len(dump) == 16 * 1024 * 1024 and dump == bytes(radio.spi)
+    assert not radio.writes                                   # rien n'a été écrit
+    assert radio_ops.dump_4mb(dump) == dump[:4 * 1024 * 1024]
+    r4 = radio_ops.restore_regions_from_dump(dump[:4 * 1024 * 1024], False)
+    r16 = radio_ops.restore_regions_from_dump(dump, False)
+    assert r4 == r16

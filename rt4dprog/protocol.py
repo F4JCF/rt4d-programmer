@@ -19,7 +19,8 @@ from typing import Callable, Optional
 
 ACK = 0x06
 BLOCK = 1024
-SPI_SIZE_KB = 4096            # la flash SPI lue par l'outil fait 4 Mo
+SPI_SIZE_KB = 4096            # zone utile de la flash SPI (canaux, réglages, police, étalonnage) : 4 Mo
+SPI_FULL_KB = 16384           # flash SPI entière du RT-4D (25Q128) : 16 Mo
 FIRMWARE_MAX_SIZE = 251904    # taille maximale d'une image firmware MCU (246 Ko)
 
 Progress = Optional[Callable[[int, int, str], None]]   # (fait, total, message)

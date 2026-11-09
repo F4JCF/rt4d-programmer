@@ -10,7 +10,7 @@ from . import layout as L
 from . import legacy as O
 from . import stock as S
 from .codeplug import Codeplug
-from .protocol import (BLOCK, SPI_SIZE_KB, CancelCheck, Cancelled, NormalLink, Progress,
+from .protocol import (BLOCK, SPI_SIZE_KB, SPI_FULL_KB, CancelCheck, Cancelled, NormalLink, Progress,
                        RadioError)
 
 Log = Callable[[str], None]
@@ -271,13 +271,14 @@ def write_codeplug(port: str, cp: Codeplug, sections: list[str], backup_dir: str
 
 
 def backup_spi(port: str, path: str, progress: Progress = None, cancel: CancelCheck = None,
-               log: Log = print):
-    """Sauvegarde complète de la flash SPI (4 Mo, environ 6 minutes)."""
+               log: Log = print, size_kb: int = SPI_SIZE_KB):
+    """Sauvegarde de la flash SPI, en lecture seule : 4 Mo (environ 6 minutes) par défaut,
+    ou 16 Mo, toute la mémoire (size_kb=SPI_FULL_KB, environ 25 minutes)."""
     link = _open_normal(port, log)
     tmp = path + ".partiel"
     try:
         with open(tmp, "wb") as f:
-            for kb in range(SPI_SIZE_KB):
+            for kb in range(size_kb):
                 if cancel and cancel():
                     raise Cancelled("Sauvegarde annulée.")
                 data = link.read_block(kb)
@@ -285,7 +286,7 @@ def backup_spi(port: str, path: str, progress: Progress = None, cancel: CancelCh
                     raise RadioError(f"Lecture refusée à 0x{kb * BLOCK:06X}.")
                 f.write(data)
                 if progress:
-                    progress(kb + 1, SPI_SIZE_KB, "Sauvegarde")
+                    progress(kb + 1, size_kb, "Sauvegarde")
         link.close_session()
         os.replace(tmp, path)
         log(f"Sauvegarde complète enregistrée : {path}")
@@ -296,6 +297,11 @@ def backup_spi(port: str, path: str, progress: Progress = None, cancel: CancelCh
                 os.remove(tmp)
             except OSError:
                 pass
+
+
+def dump_4mb(dump: bytes) -> bytes:
+    """Une sauvegarde de 16 Mo commence par la sauvegarde de 4 Mo : on ne garde que celle-ci."""
+    return dump[:SPI_SIZE_KB * BLOCK] if len(dump) == SPI_FULL_KB * BLOCK else dump
 
 
 def dump_format(dump: bytes) -> str:
@@ -313,8 +319,9 @@ def restore_regions_from_dump(dump: bytes, include_calibration: bool,
                               fmt: Optional[str] = None) -> list[tuple[int, str, bytes]]:
     """Prépare les régions à réécrire à partir d'une sauvegarde 4 Mo.
     fmt : firmware de la radio ('refw' ou 'stock'). Chaque firmware a sa propre carte des régions."""
+    dump = dump_4mb(dump)
     if len(dump) != SPI_SIZE_KB * BLOCK:
-        raise RadioError(f"Le fichier ne fait pas 4 Mo ({len(dump)} octets) : "
+        raise RadioError(f"Le fichier ne fait ni 4 ni 16 Mo ({len(dump)} octets) : "
                          "ce n'est pas une sauvegarde complète du RT-4D.")
     src = dump_format(dump)
     fmt = fmt or src
@@ -497,7 +504,7 @@ def load_any(path: str):
         return S.StockCodeplug(data[:S.IMAGE_SIZE])
     if len(data) >= O.IMAGE_SIZE and O.looks_like_legacy(data[O.A_CONTACT:O.A_CONTACT + 6]):
         return O.LegacyCodeplug(data[:O.IMAGE_SIZE])
-    if len(data) == SPI_SIZE_KB * BLOCK:
+    if len(data) in (SPI_SIZE_KB * BLOCK, SPI_FULL_KB * BLOCK):
         raise RadioError("Cette sauvegarde complète ne vient pas d'un firmware officiel V3.18+ : "
                          "elle sert uniquement à restaurer la radio (menu Radio).")
     raise RadioError(f"Format de fichier non reconnu ({len(data)} octets).")
@@ -572,7 +579,7 @@ def font_from_file(path: str) -> bytes:
     """Police de 8 Ko depuis une sauvegarde de police (8 Ko) ou une sauvegarde complète (4 Mo)."""
     with open(path, "rb") as f:
         data = f.read()
-    if len(data) == SPI_SIZE_KB * BLOCK:
+    if len(data) in (SPI_SIZE_KB * BLOCK, SPI_FULL_KB * BLOCK):
         data = data[S.FONT_ADDR:S.FONT_ADDR + S.FONT_SIZE]
     from . import fontpatch as P
     err = P.check_font(data)

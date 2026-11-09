@@ -706,6 +706,7 @@ class MainWindow(QMainWindow):
         self._act(m, "Carnet d'adresses DMR (noms des correspondants)…", self.address_book)
         m.addSeparator()
         self._act(m, "Sauvegarde complète de la flash (4 Mo)…", self.backup_full)
+        self._act(m, "Sauvegarde de toute la mémoire (16 Mo, environ 25 min)…", self.backup_full16)
         self._act(m, "Restaurer une sauvegarde complète…", self.restore_full)
         m.addSeparator()
         self._act(m, "Police avec accents (é è ê à ç î É)…", self.font_accents)
@@ -1020,19 +1021,35 @@ class MainWindow(QMainWindow):
     def address_book(self):
         self.tabs.setCurrentWidget(self.t_ab)
 
+    def backup_full16(self):
+        if QMessageBox.question(
+                self, "Sauvegarde de toute la mémoire (16 Mo)",
+                "La radio va être lue entièrement (16 Mo), sans rien y écrire. Cela prend environ "
+                "25 minutes : laissez la radio allumée et branchée jusqu'à la fin.\n\n"
+                "Le fichier obtenu sert aussi de sauvegarde complète ordinaire : Restaurer et "
+                "Police avec accents en utilisent les 4 premiers Mo.\n\nContinuer ?") != QMessageBox.Yes:
+            return
+        self._backup(16)
+
     def backup_full(self):
+        self._backup(4)
+
+    def _backup(self, mb: int):
         port = self.port_name()
         if not port:
             return
-        path, _ = QFileDialog.getSaveFileName(self, "Sauvegarde complète (4 Mo)",
-                                              os.path.join(self.backup_dir(), "RT4D-flash-complete-"
+        name = "RT4D-flash-16Mo-" if mb == 16 else "RT4D-flash-complete-"
+        path, _ = QFileDialog.getSaveFileName(self, f"Sauvegarde complète ({mb} Mo)",
+                                              os.path.join(self.backup_dir(), name +
                                                            f"{datetime.datetime.now():%Y-%m-%d}.bin"),
                                               "Image binaire (*.bin)")
         if not path:
             return
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        ok, _ = TaskDialog.run(self, "Sauvegarde complète (environ 6 minutes)",
-                               radio_ops.backup_spi, port, path)
+        from .protocol import SPI_FULL_KB, SPI_SIZE_KB
+        ok, _ = TaskDialog.run(self, "Sauvegarde complète (environ %d minutes)" % (25 if mb == 16 else 6),
+                               radio_ops.backup_spi, port, path,
+                               size_kb=SPI_FULL_KB if mb == 16 else SPI_SIZE_KB)
         if ok:
             QMessageBox.information(self, "Sauvegarde", f"Sauvegarde complète enregistrée :\n{path}")
             if os.path.normcase(os.path.abspath(path)).startswith(
