@@ -104,7 +104,7 @@ KEY_FUNCTIONS = [
     "Aucune fonction", "Écoute analogique (monitor)", "Puissance haute/basse",
     "Double veille", "Priorité émission", "Balayage (scan)", "Rétroéclairage marche/arrêt",
     "Bip de fin d'émission (analogique)", "Radio FM", "Talkaround (sans relais)",
-    "Alarme d'urgence", "Mesure de fréquence", "Décodage sous-ton à distance",
+    "Alarme d'urgence", "Mesure de fréquence (fréquencemètre)", "Recherche du sous-ton CTCSS/DCS reçu",
     "Envoi d'un ton (tone)", "Interrogation d'état", "Écoute à distance",
     "DMR : neutralisation à distance (stun)", "Spectre F4JCF (firmware F4JCF ; sinon DMR : destruction à distance)",
     "DMR : réactivation à distance", "Détection en ligne", "Affichage de l'appelé",
