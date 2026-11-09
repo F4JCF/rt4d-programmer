@@ -107,7 +107,7 @@ KEY_FUNCTIONS = [
     "Alarme d'urgence", "Mesure de fréquence (fréquencemètre)", "Recherche du sous-ton CTCSS/DCS reçu",
     "Envoi d'un ton (tone)", "Interrogation d'état", "Écoute à distance",
     "Balise F4JCF (firmware F4JCF ; sinon DMR : neutralisation à distance)", "Spectre F4JCF (firmware F4JCF ; sinon DMR : destruction à distance)",
-    "DMR : réactivation à distance", "Détection en ligne", "Affichage de l'appelé",
+    "Veille canaux (firmware F4JCF ; sinon DMR : réactivation à distance)", "Détection en ligne", "Affichage de l'appelé",
     "Bascule AM/FM (réception)", "Spectre analogique", "Niveau de squelch",
     "Pas de fréquence", "Bascule analogique/DMR", "Mode SATER (firmware F4JCF ; sinon canal météo NOAA)",
     "Enregistrer le canal", "Nouveau SMS", "Menu SMS", "Luminosité de l'écran",
