@@ -105,7 +105,7 @@ KEY_FUNCTIONS = [
     "Double veille", "Priorité émission", "Balayage (scan)", "Rétroéclairage marche/arrêt",
     "Bip de fin d'émission (analogique)", "Radio FM", "Talkaround (sans relais)",
     "Alarme d'urgence", "Mesure de fréquence (fréquencemètre)", "Recherche du sous-ton CTCSS/DCS reçu",
-    "Envoi d'un ton (tone)", "Interrogation d'état", "Écoute à distance",
+    "Envoi d'un ton (tone)", "Interrogation d'état", "Menu F4JCF (firmware F4JCF ; sinon DMR : écoute à distance)",
     "Balise F4JCF (firmware F4JCF ; sinon DMR : neutralisation à distance)", "Spectre F4JCF (firmware F4JCF ; sinon DMR : destruction à distance)",
     "Veille canaux (firmware F4JCF ; sinon DMR : réactivation à distance)", "Infos terrain (firmware F4JCF ; sinon DMR : détection en ligne)", "Affichage de l'appelé",
     "Bascule AM/FM (réception)", "Spectre analogique", "Niveau de squelch",
