@@ -41,6 +41,10 @@ V3.18 ou plus récent</b> (testé avec les V3.22 et V3.25) ou avec le firmware c
 <li><b>Radio → Écrire dans la radio</b>. Le contenu actuel de la radio est d'abord
 sauvegardé automatiquement dans le dossier indiqué.</li>
 </ol>
+<h4>Triangulation SATER (firmware F4JCF)</h4>
+<p><b>Outils → Triangulation SATER</b> : recopiez les relevés du carnet du mode SATER (touche # de la
+radio : position et azimut). Le point où les relèvements se croisent est calculé et affiché sur une
+carte (fond OpenStreetMap si Internet est disponible), avec export KML pour Google Earth.</p>
 <h4>Carnet d'adresses DMR</h4>
 <p><b>Radio → Carnet d'adresses DMR</b> : téléchargez la base RadioID.net (ou ouvrez un CSV),
 cochez les pays voulus puis envoyez. La radio affichera l'indicatif et le nom des stations
@@ -678,6 +682,13 @@ class MainWindow(QMainWindow):
             tb.addAction(a)
         return a
 
+    def triangulation(self):
+        from .triangulation import TriangulationDialog
+        if getattr(self, "_tri", None) is None:
+            self._tri = TriangulationDialog(self, self.settings)
+        self._tri.show()
+        self._tri.raise_()
+
     def _menus(self, tb):
         m = self.menuBar().addMenu("&Fichier")
         self._act(m, "Nouveau codeplug vide", self.new_file)
@@ -720,6 +731,9 @@ class MainWindow(QMainWindow):
 
         m = self.menuBar().addMenu("F&irmware")
         self._act(m, "Flasher un firmware (mise à jour / retour arrière)…", self.flash_fw)
+
+        m = self.menuBar().addMenu("&Outils")
+        self._act(m, "Triangulation SATER (relevés du carnet, carte)…", self.triangulation)
 
         m = self.menuBar().addMenu("&Aide")
         self._act(m, "Mode d'emploi", self.show_help, "F1")
