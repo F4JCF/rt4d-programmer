@@ -69,14 +69,25 @@ fictive.</p>
 <h4>Changer de firmware (mise à jour ou retour arrière)</h4>
 <ol>
 <li>Faites d'abord une <b>sauvegarde complète</b> (Radio → Sauvegarde complète, environ 6 min).</li>
-<li>Menu <b>Firmware → Flasher un firmware</b>, choisissez le paquet officiel Radtel
-(« RT-4D Upgrade Vx_xx_xxxxxx.zip ») ou un fichier <code>.bin</code>.</li>
+<li>Menu <b>Firmware → Flasher un firmware</b>. La <b>bibliothèque de firmwares</b> (dossier
+« firmwares » des sauvegardes) liste vos firmwares : « Ajouter un firmware… » y range le paquet
+officiel Radtel (« RT-4D Upgrade Vx_xx_xxxxxx.zip ») ou une version F4JCF (<code>.bin</code>).
+Chaque fichier est identifié (version F4JCF, officiel, autre) avec son empreinte SHA-256 ; un
+fichier incomplet ou qui ne démarrerait pas est refusé.</li>
 <li>Éteignez la radio, câble branché, puis <b>rallumez-la en maintenant le PTT</b>
 (mode bootloader : l'écran reste éteint).</li>
 <li>Lancez le flash et ne touchez à rien jusqu'à la fin.</li>
 </ol>
 <p>Ce logiciel flashe le firmware principal (MCU). Il ne flashe pas le firmware
-de la puce DMR. Le firmware est extrait du paquet officiel Radtel sans lancer l'outil Radtel.</p>
+de la puce DMR. Le firmware est extrait du paquet officiel Radtel sans lancer l'outil Radtel.
+Chaque flash est noté dans <code>journal-firmware.txt</code> (dossier des sauvegardes).</p>
+<h4>Importer un plan de fréquences</h4>
+<p><b>Fichier → Importer un plan de fréquences</b> : un export de CHIRP, une liste de relais ou un
+tableur enregistré en CSV (colonne Fréquence, et si vous voulez Nom, TX ou Décalage, Sous-ton…),
+ou un simple texte (« 145,500 S20 » par ligne). L'aperçu montre ce qui sera ajouté. Les canaux vont
+dans les emplacements libres à partir du numéro choisi, avec une zone si vous lui donnez un nom.
+Les fréquences déjà présentes sont sautées, et les canaux hors des bandes radioamateur sont mis en
+« RX seul ».</p>
 <h4>Sauvegarde Nextcloud</h4>
 <p><b>Fichier → Sauvegarde Nextcloud</b> : adresse de votre Nextcloud, utilisateur et
 <b>mot de passe d'application</b> (Nextcloud : Paramètres → Sécurité). Le dossier des
@@ -236,29 +247,27 @@ class WriteDialog(QDialog):
 
 
 class FirmwareDialog(QDialog):
-    def __init__(self, parent, port: str, last_dir: str):
+    """Flash du firmware : bibliothèque de firmwares, identification et contrôles (idée n°31)."""
+
+    def __init__(self, parent, port: str, last_dir: str, backup_dir: str, settings):
         super().__init__(parent)
+        from . import fw_library as FL
+        self.FL = FL
         self.setWindowTitle("Flasher un firmware (mise à jour / retour arrière)")
-        self.setMinimumWidth(600)
-        self.data = None
-        self.fw = None
+        self.resize(720, 640)
+        self.info = None
         self.last_dir = last_dir
+        self.backup_dir = backup_dir
+        self.settings = settings
+        self.lib_dir = settings.value("fw_library", FL.default_dir(backup_dir))
         v = QVBoxLayout(self)
         warn = QLabel(
-            "<b>Attention : cette opération remplace le firmware de la radio.</b><br>"
-            "Faites d'abord une sauvegarde complète (menu Radio).<br><br>"
-            "<b>Firmware officiel Radtel</b> : téléchargez la mise à jour RT-4D sur le site Radtel "
-            "(bouton ci-dessous), décompressez le .rar puis choisissez le fichier "
-            "« RT-4D Upgrade Vx_xx_xxxxxx.zip ». Le firmware est extrait sans lancer l'outil Radtel.<br>"
-            "Vous pouvez aussi choisir un fichier <code>.bin</code> (par exemple REFW).<br><br>"
-            "<b>Procédure :</b><br>"
-            "1. Éteignez la radio, laissez le câble USB branché.<br>"
-            "2. <b>Maintenez le PTT enfoncé</b> et rallumez la radio : l'écran reste éteint "
-            "(mode bootloader). Vous pouvez relâcher le PTT.<br>"
-            "3. Cliquez sur « Flasher ». Ne débranchez rien avant la fin.<br>"
-            "4. À la fin, éteignez puis rallumez la radio normalement.<br><br>"
-            "Seul le firmware principal (MCU) est flashé. La puce DMR et la table Unicode "
-            "(SMS) se mettent à jour avec les outils séparés fournis dans le même paquet Radtel.")
+            "<b>Attention : cette opération remplace le firmware de la radio.</b> "
+            "Faites d'abord une sauvegarde complète (menu Radio).<br>"
+            "<b>Procédure :</b> 1. éteignez la radio, câble USB branché ; 2. <b>maintenez le PTT</b> "
+            "et rallumez-la : l'écran reste éteint (mode bootloader) ; 3. cliquez sur « Flasher » "
+            "et ne débranchez rien avant la fin ; 4. éteignez puis rallumez la radio normalement.<br>"
+            "Seul le firmware principal (MCU) est flashé, pas celui de la puce DMR.")
         warn.setWordWrap(True)
         warn.setTextFormat(Qt.RichText)
         v.addWidget(warn)
@@ -270,21 +279,33 @@ class FirmwareDialog(QDialog):
         if i >= 0:
             self.port.setCurrentIndex(i)
         f.addRow("Port", self.port)
-        row = QHBoxLayout()
-        self.file = QLineEdit(readOnly=True)
-        b = QPushButton("Choisir…")
-        b.clicked.connect(self.pick)
-        b2 = QPushButton("Site Radtel…")
-        b2.setToolTip(FW.RADTEL_DOWNLOAD_PAGE)
-        b2.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(FW.RADTEL_DOWNLOAD_PAGE)))
-        row.addWidget(self.file, 1)
-        row.addWidget(b)
-        row.addWidget(b2)
-        f.addRow("Firmware", row)
         v.addLayout(f)
+        v.addWidget(QLabel("<b>Bibliothèque de firmwares</b> (dossier de votre ordinateur) :"))
+        self.lib = QListWidget()
+        self.lib.currentItemChanged.connect(lambda cur, _old: cur and self.load(cur.data(Qt.UserRole)))
+        v.addWidget(self.lib, 1)
+        row = QHBoxLayout()
+        for text, fn, tip in (
+                ("Ajouter un firmware…", self.add_file,
+                 "Copie un .bin, le zip ou le .exe officiel Radtel dans la bibliothèque"),
+                ("Flasher un autre fichier…", self.pick, "Choisir un fichier sans l'ajouter"),
+                ("Ouvrir le dossier", self.open_dir, self.lib_dir),
+                ("Site Radtel…", lambda: QDesktopServices.openUrl(QUrl(FW.RADTEL_DOWNLOAD_PAGE)),
+                 FW.RADTEL_DOWNLOAD_PAGE)):
+            b = QPushButton(text)
+            b.setToolTip(tip)
+            b.clicked.connect(fn)
+            row.addWidget(b)
+        v.addLayout(row)
         self.status = QLabel()
         self.status.setWordWrap(True)
+        self.status.setTextFormat(Qt.RichText)
+        self.status.setTextInteractionFlags(Qt.TextSelectableByMouse)
         v.addWidget(self.status)
+        self.context = QLabel()
+        self.context.setWordWrap(True)
+        self.context.setTextFormat(Qt.RichText)
+        v.addWidget(self.context)
         self.confirm = QCheckBox("J'ai fait une sauvegarde et je comprends le risque.")
         self.confirm.toggled.connect(self.update_ok)
         v.addWidget(self.confirm)
@@ -294,26 +315,103 @@ class FirmwareDialog(QDialog):
         bb.accepted.connect(self.accept)
         bb.rejected.connect(self.reject)
         v.addWidget(bb)
+        self.show_context()
+        self.fill_library()
         self.update_ok()
 
-    def pick(self):
+    @property
+    def data(self):
+        return self.info.image if self.info and not self.info.blocking else None
+
+    def fill_library(self, select: str = ""):
+        self.lib.blockSignals(True)
+        self.lib.clear()
+        for p in self.FL.list_library(self.lib_dir):
+            try:
+                inf = self.FL.inspect(p)
+                text = f"{inf.label}   —   {os.path.basename(p)}"
+            except Exception as e:
+                text = f"{os.path.basename(p)}   —   illisible : {e}"
+            it = QListWidgetItem(text)
+            it.setData(Qt.UserRole, p)
+            self.lib.addItem(it)
+            if select and os.path.abspath(p) == os.path.abspath(select):
+                self.lib.setCurrentItem(it)
+        if not self.lib.count():
+            it = QListWidgetItem("(vide : cliquez sur « Ajouter un firmware… »)")
+            it.setFlags(Qt.NoItemFlags)
+            self.lib.addItem(it)
+        elif self.lib.currentItem() is None:
+            self.lib.setCurrentRow(0)
+        self.lib.blockSignals(False)
+        cur = self.lib.currentItem()
+        if cur and cur.data(Qt.UserRole):
+            self.load(cur.data(Qt.UserRole))
+
+    def show_context(self):
+        lines = []
+        bk = self.FL.last_full_backup(self.backup_dir)
+        if not bk:
+            lines.append("<span style='color:#c0392b'>Aucune sauvegarde complète de la flash dans le "
+                         "dossier des sauvegardes : faites-en une avant de flasher "
+                         "(Radio → Sauvegarde complète).</span>")
+        else:
+            p, age = bk
+            col = "#27ae60" if age <= 7 else "#b9770e"
+            lines.append(f"<span style='color:{col}'>Dernière sauvegarde complète : "
+                         f"{os.path.basename(p)} (il y a {age:.0f} jour(s)).</span>")
+        last = self.settings.value("fw_last_flashed", "")
+        if last:
+            lines.append(f"Dernier firmware flashé depuis cet ordinateur : {last}")
+        self.context.setText("<br>".join(lines))
+
+    def add_file(self):
+        path = self._ask_file()
+        if not path:
+            return
+        try:
+            self.FL.inspect(path)
+            dest = self.FL.add_to_library(path, self.lib_dir)
+        except Exception as e:
+            QMessageBox.warning(self, "Bibliothèque de firmwares", str(e))
+            return
+        self.fill_library(select=dest)
+
+    def _ask_file(self) -> str:
         path, _ = QFileDialog.getOpenFileName(
             self, "Firmware RT-4D", self.last_dir,
             "Firmware RT-4D (*.zip *.exe *.bin *.rar);;Tous les fichiers (*)")
-        if not path:
-            return
-        self.last_dir = os.path.dirname(path)
-        self.file.setText(path)
+        if path:
+            self.last_dir = os.path.dirname(path)
+        return path
+
+    def pick(self):
+        path = self._ask_file()
+        if path:
+            self.lib.clearSelection()
+            self.load(path)
+
+    def open_dir(self):
+        os.makedirs(self.lib_dir, exist_ok=True)
+        QDesktopServices.openUrl(QUrl.fromLocalFile(self.lib_dir))
+
+    def load(self, path: str):
         try:
-            self.fw = FW.load_firmware(path)
-            self.data = self.fw.image
-            self.status.setText(f"<span style='color:#27ae60'><b>{self.fw.label}</b> — "
-                                f"{self.fw.used_bytes // 1024} Ko de code, prêt à flasher."
-                                f"</span>")
+            self.info = inf = self.FL.inspect(path)
         except Exception as e:
-            self.fw = None
-            self.data = None
-            self.status.setText(f"<span style='color:#c0392b'>{e}</span>")
+            self.info = None
+            self.status.setText(f"<span style='color:#c0392b'>{os.path.basename(path)} : {e}</span>")
+            self.update_ok()
+            return
+        col = "#c0392b" if inf.blocking else "#27ae60"
+        txt = (f"<span style='color:{col}'><b>{inf.label}</b></span> — {inf.fw.used_bytes // 1024} Ko "
+               f"de code<br>{inf.details}<br>Fichier : {os.path.basename(path)}<br>"
+               f"SHA-256 : <code>{inf.sha256}</code>")
+        for w in inf.warnings:
+            txt += f"<br><span style='color:#b9770e'>{w}</span>"
+        if inf.blocking:
+            txt += f"<br><span style='color:#c0392b'><b>Flash refusé :</b> {inf.blocking}</span>"
+        self.status.setText(txt)
         self.update_ok()
 
     def update_ok(self):
@@ -709,6 +807,8 @@ class MainWindow(QMainWindow):
         self._act(m, "Exporter les canaux (CSV)…", lambda: self.export_csv("channels"))
         self._act(m, "Importer des contacts (CSV)…", lambda: self.import_csv("contacts"))
         self._act(m, "Exporter les contacts (CSV)…", lambda: self.export_csv("contacts"))
+        self._act(m, "Importer un plan de fréquences (CHIRP, liste de relais, texte)…",
+                  self.import_plan)
         m.addSeparator()
         self._act(m, "Importer un codeplug d'ancien firmware (V3.17 ou plus ancien)…",
                   self.import_legacy)
@@ -931,6 +1031,27 @@ class MainWindow(QMainWindow):
         if warn:
             msg += "\n\nAvertissements :\n" + "\n".join(warn[:20])
         QMessageBox.information(self, "Import CSV", msg)
+
+    def import_plan(self):
+        from . import freqplan
+        from .plan_dialog import PlanImportDialog
+        dlg = PlanImportDialog(self, self.cp, self.last_dir())
+        if dlg.exec() != QDialog.Accepted or not dlg.plan:
+            return
+        slots, notes = freqplan.apply_plan(self.cp, dlg.plan.entries, dlg.options())
+        if hasattr(self.cp, "commit"):
+            self.cp.commit()
+        self.set_last_dir(dlg.file.text())
+        self.load_codeplug(self.cp, self.path)
+        self.mark_dirty()
+        self.log(f"Plan de fréquences importé : {dlg.file.text()} ({len(slots)} canaux)")
+        msg = f"{len(slots)} canal(aux) ajouté(s)"
+        if slots:
+            msg += f" (n° {slots[0] + 1} à {slots[-1] + 1})"
+        msg += ".\n\nVérifiez les canaux, puis écrivez dans la radio."
+        if notes:
+            msg += "\n\nRemarques :\n• " + "\n• ".join(notes[:15])
+        QMessageBox.information(self, "Plan de fréquences", msg)
 
     def import_legacy(self):
         if getattr(self.cp, "kind", "refw") != "stock":
@@ -1179,16 +1300,29 @@ class MainWindow(QMainWindow):
             self.backup.after_backup()
 
     def flash_fw(self):
-        dlg = FirmwareDialog(self, self.port.currentData(), self.settings.value("fw_dir", self.last_dir()))
-        if dlg.exec() != QDialog.Accepted:
+        from . import fw_library as FL
+        dlg = FirmwareDialog(self, self.port.currentData(), self.settings.value("fw_dir", self.last_dir()),
+                             self.backup_dir(), self.settings)
+        if dlg.exec() != QDialog.Accepted or not dlg.data:
             return
         self.settings.setValue("fw_dir", dlg.last_dir)
         port = dlg.port.currentData()
-        ok, _ = TaskDialog.run(self, "Flash du firmware", protocol.flash_firmware, port, dlg.data,
-                               cancellable=False, full_image=bool(dlg.fw and dlg.fw.official))
+        info = dlg.info
+        self.log(f"Flash : {info.label} — {info.path} — SHA-256 {info.sha256}")
+        ok, _ = TaskDialog.run(self, "Flash du firmware", protocol.flash_firmware, port, info.image,
+                               cancellable=False)
+        try:
+            FL.journal(self.backup_dir(), info, port, "flash réussi" if ok else "flash ÉCHOUÉ")
+        except OSError as e:
+            self.log(f"Journal des firmwares impossible : {e}")
         if ok:
+            self.settings.setValue("fw_last_flashed",
+                                   f"{info.label} ({os.path.basename(info.path)}), "
+                                   f"le {datetime.datetime.now():%d/%m/%Y à %H:%M}")
+            extra = ("\n\nAu redémarrage, vérifiez le menu Version et la touche du Menu F4JCF."
+                     if info.kind == "f4jcf" else "")
             QMessageBox.information(self, "Firmware", "Firmware flashé avec succès.\n\nÉteignez puis "
-                                    "rallumez la radio normalement.")
+                                    "rallumez la radio normalement." + extra)
 
     # -- mises à jour (même fonctionnement que CAT Pilot) --
     def set_update_flag(self, available, version=""):
