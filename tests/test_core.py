@@ -824,3 +824,26 @@ def test_backup_16mb(radio, tmp_path):
     r4 = radio_ops.restore_regions_from_dump(dump[:4 * 1024 * 1024], False)
     r16 = radio_ops.restore_regions_from_dump(dump, False)
     assert r4 == r16
+
+
+def test_stock_dtmf():
+    from rt4dprog.stock import DTMF_OFF, dtmf_clean
+    spi = make_stock_spi()
+    base = 0x2000 + DTMF_OFF
+    for i in range(20):                               # comme le poste : FF + longueur 0
+        spi[base + 16 * i:base + 16 * i + 16] = b"\xFF" * 15 + b"\x00"
+    spi[base + 16 * 2:base + 16 * 3] = b"12A*#" + b"\xFF" * 10 + b"\x05"
+    cp = S.StockCodeplug(bytes(spi[:S.IMAGE_SIZE]))
+    assert cp.dtmf[2] == "12A*#" and cp.dtmf[0] == "" and len(cp.dtmf) == 20
+    assert bytes(cp.build()) == bytes(spi[:S.IMAGE_SIZE])          # rien changé : identique
+    cp.dtmf[0] = dtmf_clean(" 1 23d ")
+    cp.dtmf[2] = ""
+    cp.dtmf[19] = "#9"
+    img = cp.build()
+    assert img[base:base + 16] == b"123D" + b"\xFF" * 11 + b"\x04"
+    assert img[base + 32:base + 48] == b"\xFF" * 15 + b"\x00"
+    assert img[base + 304:base + 320] == b"#9" + b"\xFF" * 13 + b"\x02"
+    assert img[0x2000 + 842] == spi[0x2000 + 842]                    # octet suivant intact
+    for bad in ("12E", "1" * 16):
+        with pytest.raises(ValueError):
+            dtmf_clean(bad)

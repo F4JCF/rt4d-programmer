@@ -27,6 +27,11 @@ FW_EXT = (".bin", ".zip", ".exe")
 
 # Versions connues : empreinte SHA-256 de l'image flashée (246 Ko) → (nom, contenu)
 KNOWN = {
+    "b029f531289cc8dd2f9330e35117a6bd0e14cb49db568fdf970da0638c2ca6cb": (
+        "F4JCF15 (V3.25, menus FR04)",
+        "Réglages des modes depuis RT4D Programmer (Radio → Réglages des modes F4JCF) : canaux "
+        "SATER, valeurs de départ et indicatif de la balise, période du rappel d'indicatif. "
+        "Menu Version : « F4JCF15 11/2026 ». Contient F4JCF14."),
     "a4c0c02904cf7449ebaced9d06419466c26af621dce41d2cd97c59624f10cd56": (
         "F4JCF14 (V3.25, menus FR04)",
         "Talker Alias et niveau du signal DMR sur l'écran d'appel, écran « Trames DMR » "

@@ -1227,3 +1227,88 @@ class RadioMenuTab(BaseTab):
                 changed = True
         if changed:
             self.changed.emit()
+
+
+# ───────────────────────────── Codes DTMF ─────────────────────────────
+class DtmfTab(BaseTab):
+    """Liste DTMF-01 à DTMF-16 et codes de commande à distance (firmware officiel V3.18+)."""
+
+    def __init__(self):
+        super().__init__()
+        from .stock import DTMF_N, DTMF_NAMES
+        self.names = DTMF_NAMES
+        v = QVBoxLayout(self)
+        self.info = QLabel()
+        self.info.setWordWrap(True)
+        v.addWidget(self.info)
+        self.table = QTableWidget(DTMF_N, 3)
+        self.table.setHorizontalHeaderLabels(["Fiche", "Code (0-9, A-D, *, #)", "Remarque"])
+        self.table.verticalHeader().setVisible(False)
+        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        self.table.setColumnWidth(0, 260)
+        self.table.setColumnWidth(1, 220)
+        for i, n in enumerate(self.names):
+            self.table.setItem(i, 0, _ro(n))
+            self.table.setItem(i, 2, _ro(""))
+        self.table.itemChanged.connect(self.edited)
+        v.addWidget(self.table, 1)
+        row = QHBoxLayout()
+        b = QPushButton("Effacer le code sélectionné")
+        b.clicked.connect(self.clear_selected)
+        row.addWidget(b)
+        row.addStretch()
+        v.addLayout(row)
+
+    def refresh(self):
+        if not self.cp:
+            return
+        ok = self.cp.LIMITS.get("dtmf", False)
+        self.table.setEnabled(ok and not self.ro)
+        if not ok:
+            self.info.setText("La liste DTMF n'est disponible qu'avec le firmware officiel Radtel "
+                              "(V3.18 ou plus récent) ou le firmware F4JCF.")
+            return
+        self.info.setText(
+            "<b>DTMF-01 à DTMF-16</b> : codes envoyés au début ou à la fin de l'émission selon le "
+            "réglage <i>Mode DTMF</i>, le code étant choisi par <i>Choix DTMF</i> (onglet Réglages "
+            "radio, menu Analogique 14 et 15) ou par la touche « Choix DTMF ». 15 caractères au plus.<br>"
+            "<b>Codes de commande</b> : reconnus en réception seulement si <i>Commande DTMF</i> est "
+            "en marche (menu Analogique 19). Le code « Blocage » ou « Mise hors service » reçu "
+            "<b>bloque le poste</b> jusqu'à la réception du code « Réveil » : laissez-les vides si "
+            "vous ne vous en servez pas, et ne les communiquez pas.")
+        self.info.setTextFormat(Qt.RichText)
+        self.table.blockSignals(True)
+        cur = self.cp.radio.get(("cfg", 516))
+        for i, code in enumerate(self.cp.dtmf):
+            it = QTableWidgetItem(code)
+            self.table.setItem(i, 1, it)
+            note = ""
+            if i < 16 and cur == i:
+                note = "code choisi actuellement (Choix DTMF)"
+            self.table.item(i, 2).setText(note)
+        self.table.blockSignals(False)
+
+    def edited(self, it: QTableWidgetItem):
+        if not self.cp or it.column() != 1:
+            return
+        from .stock import dtmf_clean
+        i = it.row()
+        try:
+            code = dtmf_clean(it.text())
+        except ValueError as e:
+            QMessageBox.warning(self, "Code DTMF", f"{self.names[i]} : {e}.")
+            self.table.blockSignals(True)
+            it.setText(self.cp.dtmf[i])
+            self.table.blockSignals(False)
+            return
+        self.table.blockSignals(True)
+        it.setText(code)
+        self.table.blockSignals(False)
+        if code != self.cp.dtmf[i]:
+            self.cp.dtmf[i] = code
+            self.changed.emit()
+
+    def clear_selected(self):
+        r = self.table.currentRow()
+        if r >= 0 and self.cp and self.cp.dtmf[r]:
+            self.table.item(r, 1).setText("")

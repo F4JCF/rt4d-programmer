@@ -656,3 +656,68 @@ def write_calibration(port: str, new: bytes, expected: bytes, operator: str, bac
         return bk
     finally:
         link.close()
+
+
+# ─────────────────────── Réglages des modes F4JCF (F4JCF15) ───────────────────────
+
+def read_f4set(port: str, progress: Progress = None, cancel: CancelCheck = None,
+               log: Log = print) -> bytes:
+    """Lit le secteur du logo (0x100000, 4 Ko) qui contient les réglages des modes F4JCF."""
+    from . import f4set as FS
+    link = _open_normal(port, log)
+    try:
+        rd = BlockCache(link, cancel)
+        fmt, _ = _detect_format(rd)
+        if fmt != "stock":
+            raise RadioError("Les réglages des modes F4JCF demandent le firmware F4JCF "
+                             "(dérivé du firmware officiel Radtel V3.25).")
+        sector = rd.read(FS.SECTOR_ADDR, FS.SECTOR_SIZE,
+                         lambda: progress and progress(len(rd.cache), 6, "Réglages F4JCF"))
+        link.close_session()
+    finally:
+        link.close()
+    return sector
+
+
+def write_f4set(port: str, settings, expected: bytes, backup_dir: str, progress: Progress = None,
+                cancel: CancelCheck = None, log: Log = print) -> str:
+    """Écrit les réglages des modes F4JCF (région 0x9A). Le secteur actuel de la radio doit être
+    celui qui a été lu (`expected`, logo compris) ; il est enregistré sur l'ordinateur avant
+    l'écriture, puis relu et comparé. Retourne le chemin de la sauvegarde."""
+    import datetime
+    from . import f4set as FS
+    link = _open_normal(port, log)
+    try:
+        rd = BlockCache(link, cancel)
+        fmt, _ = _detect_format(rd)
+        if fmt != "stock":
+            raise RadioError("La radio ne contient pas un firmware dérivé du firmware officiel "
+                             "Radtel V3.25 : rien n'a été écrit.")
+        _connect(link, fmt, log)
+        cur = rd.read(FS.SECTOR_ADDR, FS.SECTOR_SIZE)
+        os.makedirs(backup_dir, exist_ok=True)
+        bk = os.path.join(backup_dir, f"RT4D-logo-et-reglages-F4JCF-avant-"
+                          f"{datetime.datetime.now():%Y%m%d-%H%M%S}.bin")
+        with open(bk, "wb") as f:
+            f.write(cur)
+        log(f"Secteur du logo enregistré : {bk}")
+        if cur != expected:
+            raise RadioError("Le logo ou les réglages de la radio ont changé depuis la lecture "
+                             "(autre radio ?). Relisez les réglages. Rien n'a été écrit.")
+        new = FS.build_sector(cur, settings)
+        if new == cur:
+            log("La radio contient déjà ces réglages : rien à écrire.")
+            link.close_session()
+            return bk
+        log("Écriture des réglages des modes F4JCF (secteur du logo, 4 blocs)…")
+        link.write_region(FS.LOGO_REGION, new, progress, cancel, "Réglages F4JCF")
+        back = BlockCache(link).read(FS.SECTOR_ADDR, FS.SECTOR_SIZE)
+        if back != new:
+            raise RadioError("Le secteur relu ne correspond pas à celui envoyé. Recommencez "
+                             f"l'écriture ; le logo d'origine est dans {bk}.")
+        link.close_session()
+        log("Réglages écrits et vérifiés. Le firmware F4JCF15 les prend en compte au prochain "
+            "allumage du poste.")
+        return bk
+    finally:
+        link.close()

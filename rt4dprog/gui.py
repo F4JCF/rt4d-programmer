@@ -24,7 +24,7 @@ from . import addressbook as AB
 from . import firmware_pkg as FW
 from . import legacy, linux_desktop, protocol, radio_ops, updater
 from .codeplug import Codeplug
-from .gui_tabs import (ChannelsTab, ContactsTab, FreqLimitsTab, GroupsTab, KeysTab, RadioMenuTab, SettingsTab, StartupTab,
+from .gui_tabs import (ChannelsTab, ContactsTab, DtmfTab, FreqLimitsTab, GroupsTab, KeysTab, RadioMenuTab, SettingsTab, StartupTab,
                        ZonesTab)
 from .protocol import Cancelled, RadioError
 
@@ -81,6 +81,15 @@ fichier incomplet ou qui ne démarrerait pas est refusé.</li>
 <p>Ce logiciel flashe le firmware principal (MCU). Il ne flashe pas le firmware
 de la puce DMR. Le firmware est extrait du paquet officiel Radtel sans lancer l'outil Radtel.
 Chaque flash est noté dans <code>journal-firmware.txt</code> (dossier des sauvegardes).</p>
+<h4>Codes DTMF</h4>
+<p>Onglet <b>Codes DTMF</b> : DTMF-01 à DTMF-16 (envoyés selon <i>Mode DTMF</i> et <i>Choix DTMF</i>,
+onglet Réglages radio) et les codes de commande à distance, actifs seulement si <i>Commande DTMF</i>
+est en marche. Le code de blocage ou de mise hors service reçu bloque le poste jusqu'au code de réveil :
+laissez-les vides si vous ne vous en servez pas.</p>
+<h4>Réglages des modes F4JCF</h4>
+<p><b>Radio → Réglages des modes F4JCF</b> (firmware F4JCF15 ou plus récent) : canaux des touches 1 à 4
+du SATER, valeurs de départ et indicatif de la balise, période du rappel d'indicatif. Lisez la radio,
+modifiez, écrivez, puis éteignez et rallumez le poste. Le logo de démarrage est conservé.</p>
 <h4>Importer un plan de fréquences</h4>
 <p><b>Fichier → Importer un plan de fréquences</b> : un export de CHIRP, une liste de relais ou un
 tableur enregistré en CSV (colonne Fréquence, et si vous voulez Nom, TX ou Décalage, Sous-ton…),
@@ -735,13 +744,15 @@ class MainWindow(QMainWindow):
         self.t_start = StartupTab()
         self.t_lim = FreqLimitsTab()
         self.t_radio = RadioMenuTab()
+        self.t_dtmf = DtmfTab()
         self.t_ab = AddressBookTab(self)
         self.logbox = QPlainTextEdit(readOnly=True)
         self.logbox.setFont(QFont("Monospace", 9))
         for t, name in ((self.t_ch, "Canaux"), (self.t_ct, "Contacts"), (self.t_gl, "Groupes RX"),
                         (self.t_zn, "Zones"), (self.t_st, "ID DMR"),
                         (self.t_keys, "Réglages touches"), (self.t_start, "Menu démarrage"),
-                        (self.t_radio, "Réglages radio"), (self.t_lim, "Limites de fréquences")):
+                        (self.t_radio, "Réglages radio"), (self.t_dtmf, "Codes DTMF"),
+                        (self.t_lim, "Limites de fréquences")):
             self.tabs.addTab(t, name)
             t.changed.connect(self.mark_dirty)
         self.tabs.addTab(self.t_ab, "Carnet adresse DMR")
@@ -830,6 +841,7 @@ class MainWindow(QMainWindow):
         self._act(m, "Restaurer une sauvegarde complète…", self.restore_full)
         m.addSeparator()
         self._act(m, "Calibration du poste (consultation, modification encadrée)…", self.calibration)
+        self._act(m, "Réglages des modes F4JCF (SATER, Balise, rappel)…", self.f4set)
         m.addSeparator()
         self._act(m, "Police avec accents (é è ê à ç î É)…", self.font_accents)
         self.act_accents = QAction("Accents dans les noms (police avec accents installée)", self,
@@ -936,7 +948,7 @@ class MainWindow(QMainWindow):
         self.path = path
         self.dirty = False
         for t in (self.t_ch, self.t_ct, self.t_gl, self.t_zn, self.t_st, self.t_keys, self.t_start,
-                  self.t_radio, self.t_lim):
+                  self.t_radio, self.t_dtmf, self.t_lim):
             t.set_codeplug(cp)
         self.update_banner()
         self.update_title()
@@ -1227,6 +1239,13 @@ class MainWindow(QMainWindow):
                                dlg.calib.isChecked())
         if ok:
             QMessageBox.information(self, "Restauration", "Restauration terminée. Redémarrez la radio.")
+
+    def f4set(self):
+        from .f4set_dialog import F4SetDialog
+        if getattr(self, "_f4set", None) is None:
+            self._f4set = F4SetDialog(self)
+        self._f4set.show()
+        self._f4set.raise_()
 
     def calibration(self):
         from .calibration_dialog import CalibrationDialog

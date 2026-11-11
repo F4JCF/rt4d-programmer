@@ -182,12 +182,48 @@ def group_default_name(i: int) -> str:
     return f"TG List-{i + 1:03d}"
 
 
+# Codes DTMF (réglages 0x2000, octet 522) : 20 fiches de 16 octets, 15 caractères ASCII
+# (0-9, A-D, *, #) complétés par FF, puis la longueur. Fiches 0-15 = DTMF-01 à DTMF-16 (menu
+# « Choix DTMF », envoi au début ou à la fin de l'émission) ; fiches 16-19 = codes de commande à
+# distance, reconnus seulement si « Commande DTMF » est en marche (aiguillage 0x08019BA0, V3.25).
+DTMF_OFF = 522
+DTMF_N = 20
+DTMF_LEN = 15
+DTMF_CHARS = "0123456789ABCD*#"
+DTMF_NAMES = [f"DTMF-{i:02d}" for i in range(1, 17)] + [
+    "Blocage à distance (Remote Stun)", "Mise hors service (Remote Kill)",
+    "Réveil (Wake Up)", "4e commande (écoute à distance ? 60 s)"]
+
+
+def dtmf_decode(rec: bytes) -> str:
+    n = rec[DTMF_LEN]
+    if not 0 < n <= DTMF_LEN:
+        return ""
+    return "".join(chr(c) for c in rec[:n] if chr(c) in DTMF_CHARS)
+
+
+def dtmf_encode(code: str) -> bytes:
+    code = dtmf_clean(code)
+    return code.encode("ascii") + b"\xFF" * (DTMF_LEN - len(code)) + bytes([len(code)])
+
+
+def dtmf_clean(code: str) -> str:
+    """Majuscules, caractères DTMF seulement, 15 au plus. Lève ValueError sinon."""
+    c = code.strip().upper().replace(" ", "")
+    bad = sorted({ch for ch in c if ch not in DTMF_CHARS})
+    if bad:
+        raise ValueError(f"caractère(s) non DTMF : {' '.join(bad)} (autorisés : 0-9 A-D * #)")
+    if len(c) > DTMF_LEN:
+        raise ValueError(f"{len(c)} caractères : 15 au plus")
+    return c
+
+
 class StockCodeplug:
     kind = "stock"
     is_refw = False
     LIMITS = dict(channels=CH_MAX, contacts=CT_MAX, groups=GL_MAX, group_ids=GL_IDS,
                   zones=ZN_MAX, zone_channels=ZN_CH_MAX, zone_scan=False, contact0_fixed=True,
-                  keys=True, startup=True, freq_limits=True, radio=True)
+                  keys=True, startup=True, freq_limits=True, radio=True, dtmf=True)
 
     def __init__(self, image: bytes):
         if len(image) >= IMAGE_SIZE:
@@ -255,6 +291,7 @@ class StockCodeplug:
         self.radio = {(area, off): img[(A_CFG if area == "cfg" else A_CFG2) + off]
                       for _, _, _, area, off, _ in RADIO_FIELDS}
         cfg = img[A_CFG:A_CFG + 0x400]
+        self.dtmf = [dtmf_decode(cfg[DTMF_OFF + 16 * i:DTMF_OFF + 16 * (i + 1)]) for i in range(DTMF_N)]
         self.freq_limits = [list(struct.unpack_from("<BHH", cfg, LIMIT_OFF + 5 * i))
                             for i in range(LIMIT_N)]
         self.settings = Settings(radio_id=bcd_decode(cfg[384:388]),
@@ -344,6 +381,10 @@ class StockCodeplug:
         put_name(cfg, 44, s.startup_message, 32)
         for i, (t, a, b) in enumerate(self.freq_limits):
             struct.pack_into("<BHH", cfg, LIMIT_OFF + 5 * i, t & 0xFF, a & 0xFFFF, b & 0xFFFF)
+        for i, code in enumerate(self.dtmf[:DTMF_N]):
+            o = DTMF_OFF + 16 * i
+            if dtmf_decode(cfg[o:o + 16]) != code:        # fiche inchangée : octets d'origine gardés
+                cfg[o:o + 16] = dtmf_encode(code)
         img[A_CFG:A_CFG + 0x400] = cfg
         return bytes(img)
 
