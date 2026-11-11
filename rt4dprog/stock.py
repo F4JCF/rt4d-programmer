@@ -135,7 +135,7 @@ STARTUP_FIELDS = [
     ("digits", "cfg", 234, 1, ["6 chiffres", "8 chiffres"], "Chiffres de la fréquence", "Affichage"),
     ("light", "cfg", 97, 1, ["0", "1", "2", "3", "4"], "Luminosité de l'écran", "Affichage"),
     ("light_t", "cfg", 98, 1, _TIMER, "Extinction du rétroéclairage", "Affichage"),
-    ("contrast", "cfg", 233, 1, (5, 25), "Contraste", "Affichage"),
+    ("contrast", "cfg", 233, 1, (0, 10), "Contraste", "Affichage"),
     ("menu_t", "cfg", 101, 1, _TIMER, "Sortie automatique des menus", "Affichage"),
     ("grp_disp", "cfg", 404, 1, ["Ville de l'appelant", "ID de l'appelant"], "Appel de groupe : afficher", "Affichage"),
     ("voice", "cfg", 92, 1, _ONOFF, "Annonces vocales", "Sons et voyants"),
@@ -187,7 +187,7 @@ class StockCodeplug:
     is_refw = False
     LIMITS = dict(channels=CH_MAX, contacts=CT_MAX, groups=GL_MAX, group_ids=GL_IDS,
                   zones=ZN_MAX, zone_channels=ZN_CH_MAX, zone_scan=False, contact0_fixed=True,
-                  keys=True, startup=True, freq_limits=True)
+                  keys=True, startup=True, freq_limits=True, radio=True)
 
     def __init__(self, image: bytes):
         if len(image) >= IMAGE_SIZE:
@@ -251,6 +251,9 @@ class StockCodeplug:
         for key, area, off, size, *_ in STARTUP_FIELDS:
             base = A_CFG if area == "cfg" else A_CFG2
             self.startup[key] = int.from_bytes(img[base + off:base + off + size], "little")
+        from .radio_menu import RADIO_FIELDS
+        self.radio = {(area, off): img[(A_CFG if area == "cfg" else A_CFG2) + off]
+                      for _, _, _, area, off, _ in RADIO_FIELDS}
         cfg = img[A_CFG:A_CFG + 0x400]
         self.freq_limits = [list(struct.unpack_from("<BHH", cfg, LIMIT_OFF + 5 * i))
                             for i in range(LIMIT_N)]
@@ -324,6 +327,10 @@ class StockCodeplug:
         for key, area, off, size, *_ in STARTUP_FIELDS:
             base = A_CFG if area == "cfg" else A_CFG2
             img[base + off:base + off + size] = int(self.startup[key]).to_bytes(size, "little")
+
+        # réglages des menus du poste (onglet « Réglages radio »)
+        for (area, off), val in self.radio.items():
+            img[(A_CFG if area == "cfg" else A_CFG2) + off] = val & 0xFF
 
         # touches programmables
         for (off, _), val in zip(KEY_SLOTS, self.keys):

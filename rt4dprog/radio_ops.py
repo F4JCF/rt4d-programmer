@@ -586,3 +586,73 @@ def font_from_file(path: str) -> bytes:
     if err:
         raise RadioError(f"Ce fichier ne contient pas une police du RT-4D : {err}")
     return data
+
+
+# ─────────────────────────────── Calibration ───────────────────────────────
+
+def read_calibration(port: str, progress: Progress = None, cancel: CancelCheck = None,
+                     log: Log = print) -> tuple[bytes, bytes]:
+    """Lit la calibration (0x0000, 4 Ko) et sa copie de secours (0x1000). Lecture seule."""
+    from . import calibration as C
+    link = _open_normal(port, log)
+    try:
+        rd = BlockCache(link, cancel)
+        fmt, _ = _detect_format(rd)
+        if fmt != "stock":
+            raise RadioError("La calibration n'est prise en charge qu'avec le firmware officiel "
+                             "Radtel V3.18+ (ou le firmware F4JCF qui en dérive).")
+        cal = rd.read(C.CAL_ADDR, C.CAL_SIZE, lambda: progress and progress(len(rd.cache), 8, "Calibration"))
+        copy = rd.read(C.CAL_COPY_ADDR, C.CAL_SIZE, lambda: progress and progress(len(rd.cache), 8, "Calibration"))
+        link.close_session()
+    finally:
+        link.close()
+    return cal, copy
+
+
+def write_calibration(port: str, new: bytes, expected: bytes, operator: str, backup_dir: str,
+                      progress: Progress = None, cancel: CancelCheck = None, log: Log = print,
+                      changes=None) -> str:
+    """Écrit une calibration (région 0x40) après validation de l'opérateur (faite par l'appelant).
+    Garde-fous : la calibration présente dans la radio doit être celle à partir de laquelle les
+    modifications ont été faites (`expected`) ; la calibration et la copie de secours de la radio
+    sont enregistrées sur l'ordinateur avant toute écriture ; relecture et comparaison après
+    écriture ; journal des opérations. Retourne le chemin de la sauvegarde."""
+    from . import calibration as C
+    err = C.check(new) or C.check_operator(operator)
+    if err:
+        raise RadioError("Écriture de la calibration refusée : " + err)
+    link = _open_normal(port, log)
+    try:
+        rd = BlockCache(link, cancel)
+        fmt, _ = _detect_format(rd)
+        if fmt != "stock":
+            raise RadioError("La radio ne contient pas le firmware officiel Radtel V3.18+ : "
+                             "écriture de la calibration annulée.")
+        _connect(link, fmt, log)
+        log("Lecture de la calibration actuelle de la radio…")
+        cur = rd.read(C.CAL_ADDR, C.CAL_SIZE)
+        copy = rd.read(C.CAL_COPY_ADDR, C.CAL_SIZE)
+        bk = C.save_backup(backup_dir, cur, "avant", copy)
+        log(f"Calibration actuelle enregistrée : {bk}")
+        if cur != expected:
+            raise RadioError("La calibration de la radio n'est plus celle qui a été lue et modifiée "
+                             "(autre radio, ou modifiée entre-temps). Relisez la calibration. "
+                             "Rien n'a été écrit.")
+        if cur == new:
+            log("La radio contient déjà cette calibration : rien à écrire.")
+            link.close_session()
+            return bk
+        log("Écriture de la calibration (4 blocs)…")
+        link.write_region(C.CAL_REGION, new, progress, cancel, "Calibration")
+        log("Relecture de contrôle…")
+        back = BlockCache(link).read(C.CAL_ADDR, C.CAL_SIZE)
+        if back != new:
+            raise RadioError("La calibration relue ne correspond pas à celle envoyée. NE PAS "
+                             "éteindre la radio : recommencez l'écriture, ou restaurez la "
+                             f"sauvegarde {bk}.")
+        link.close_session()
+        C.journal(backup_dir, operator, changes if changes is not None else [], cur, new)
+        log("Calibration écrite et vérifiée. La radio l'utilise après redémarrage.")
+        return bk
+    finally:
+        link.close()

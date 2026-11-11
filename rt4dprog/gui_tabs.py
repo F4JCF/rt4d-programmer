@@ -1145,3 +1145,85 @@ class FreqLimitsTab(BaseTab):
             html.append("<span style='color:#27ae60'>Tous les canaux du codeplug pourront émettre "
                         "avec ces limites.</span>")
         self.check.setText("<br>".join(html))
+
+
+# ───────────────────────────── Réglages radio (menus du poste) ─────────────────────────────
+
+class RadioMenuTab(BaseTab):
+    """Réglages des menus Réglages / Analogique / Numérique du poste (firmware officiel V3.18+)."""
+
+    def __init__(self):
+        super().__init__()
+        from PySide6.QtWidgets import QScrollArea
+        from .radio_menu import RADIO_FIELDS
+        self.fields = RADIO_FIELDS
+        outer = QVBoxLayout(self)
+        self.info = QLabel()
+        self.info.setWordWrap(True)
+        outer.addWidget(self.info)
+        area = QScrollArea()
+        area.setWidgetResizable(True)
+        inner = QWidget()
+        cols = QHBoxLayout(inner)
+        area.setWidget(inner)
+        outer.addWidget(area, 1)
+        self.widgets = {}
+        self.boxes = []
+        forms = {}
+        for menu in ("Réglages", "Analogique", "Numérique"):
+            box = QGroupBox(f"Menu {menu}")
+            forms[menu] = QFormLayout(box)
+            col = QVBoxLayout()
+            col.addWidget(box)
+            col.addStretch()
+            cols.addLayout(col, 1)
+            self.boxes.append(box)
+        for menu, num, label, zone, off, choices in self.fields:
+            w = QComboBox()
+            w.setMaxVisibleItems(20)
+            w.addItems(choices)
+            w.setToolTip(f"Menu {menu}, entrée n°{num} — octet {off} des réglages"
+                         f"{'' if zone == 'cfg' else ' n°2'}")
+            w.currentIndexChanged.connect(self.save)
+            self.widgets[(zone, off)] = w
+            forms[menu].addRow(f"{num:02d}  {label}", w)
+
+    def refresh(self):
+        if not self.cp:
+            return
+        ok = self.cp.LIMITS.get("radio", False)
+        for b in self.boxes:
+            b.setEnabled(ok and not self.ro)
+        if not ok:
+            self.info.setText("Ces réglages ne sont disponibles qu'avec le firmware officiel Radtel "
+                              "(V3.18 ou plus récent) ou le firmware F4JCF.")
+            return
+        self.info.setText(
+            "Les mêmes réglages que dans les menus du poste (numéros des entrées du menu). Les "
+            "réglages d'allumage, d'affichage, des sons et du contraste sont dans l'onglet « Menu "
+            "démarrage ». Écrivez dans la radio pour les envoyer.")
+        with _Block(list(self.widgets.values())):
+            for key, w in self.widgets.items():
+                val = self.cp.radio.get(key, 0)
+                n = len(self.fields[[(f[3], f[4]) for f in self.fields].index(key)][5])
+                while w.count() > n:
+                    w.removeItem(n)
+                if val >= n:
+                    w.addItem(f"Valeur inconnue ({val})")
+                    w.setCurrentIndex(n)
+                else:
+                    w.setCurrentIndex(val)
+
+    def save(self, *_):
+        if not self.cp or not self.cp.LIMITS.get("radio", False):
+            return
+        changed = False
+        for menu, num, label, zone, off, choices in self.fields:
+            v = self.widgets[(zone, off)].currentIndex()
+            if v >= len(choices):
+                continue                  # valeur inconnue conservée telle quelle
+            if self.cp.radio.get((zone, off)) != v:
+                self.cp.radio[(zone, off)] = v
+                changed = True
+        if changed:
+            self.changed.emit()

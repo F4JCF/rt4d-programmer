@@ -17,6 +17,8 @@ Ce logiciel programme le talkie-walkie **Radtel RT-4D** sous **Windows et Linux*
 - **Sauvegarde automatique** : avant chaque écriture, le logiciel relit la radio et enregistre son contenu dans un fichier `.4rdmf`.
 - **Réglages des touches** (firmware officiel) : action des touches latérales, de la touche alarme et des appuis longs 0 à 9, parmi les 41 fonctions proposées par Radtel.
 - **Menu démarrage** (firmware officiel) : message d'accueil et sa position, logo, bip, mode de travail et zone des voies A/B à l'allumage, affichage (nom, fréquence ou canal), luminosité, rétroéclairage, contraste, sons et voyants.
+- **Réglages radio** (firmware officiel et firmware F4JCF) : les réglages des menus Réglages, Analogique et Numérique du poste (double veille, pas, sans relais, économie, balayage, type d'alarme, squelch, bips, gains micro et haut-parleur, DTMF, VOX, débruiteur DMR…), avec les mêmes choix que dans la radio et le numéro de l'entrée du menu.
+- **Calibration du poste** (Radio → Calibration) : consultation des tables d'usine (polarisation de l'ampli d'émission en puissance haute et basse, squelch large et étroit, tous les 5 MHz). La modification est verrouillée : l'opérateur doit donner son indicatif, recopier une phrase de confirmation et cocher l'avertissement, puis la recopier encore avant l'écriture. Seules les bandes VHF 136-174 et UHF 400-480 MHz et ces 6 tables sont modifiables, avec un écart limité par rapport à l'origine. La calibration et la copie de secours de la radio sont enregistrées sur l'ordinateur avant chaque écriture, la calibration écrite est relue et comparée, chaque opération est notée dans `journal-calibration.txt`, et « Restaurer une calibration enregistrée » remet l'origine.
 - **Limites de fréquences** (firmware officiel) : les 4 plages du poste, pour interdire l'émission sur certaines fréquences. Un bouton limite l'émission aux bandes radioamateur 144-146 et 430-440 MHz. L'onglet signale les canaux qui ne pourront plus émettre. Par défaut, le poste peut émettre de 18 à 1000 MHz (sauf 108-136 MHz, toujours refusé).
 - **Onglet « Carnet adresse DMR »** : bouton de mise à jour de la liste RadioID.net (gardée sur le PC), recherche, choix des pays, puis envoi à la radio, qui affiche l'indicatif et le nom des correspondants.
 - **Sauvegarde Nextcloud** (Fichier → Sauvegarde Nextcloud), comme dans CAT Pilot : le dossier des sauvegardes, le codeplug ouvert et les réglages (sans le mot de passe) sont envoyés sur votre Nextcloud, ou un autre serveur WebDAV, une fois par jour et après chaque nouvelle sauvegarde. Seuls les fichiers nouveaux partent, et rien n'est effacé sur le serveur.
@@ -68,6 +70,7 @@ Limites :
 - L'écriture du codeplug est **bloquée** si le format de la radio n'est pas reconnu, ou s'il ne correspond pas au codeplug ouvert.
 - Avec le firmware officiel, la séquence d'écriture est celle du logiciel Radtel : mot de passe et fin des réglages relus dans la radio, puis toutes les régions écrites dans le même ordre.
 - Les octets inconnus des enregistrements sont conservés tels qu'ils ont été lus.
+- La calibration n'est jamais écrite sans la validation de l'opérateur (indicatif et phrase recopiée deux fois). Modifiez-la seulement avec un wattmètre et une charge fictive.
 - Ce logiciel est fourni **sans aucune garantie**. Faites des sauvegardes.
 
 ## Développement

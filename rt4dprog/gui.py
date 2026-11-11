@@ -24,7 +24,7 @@ from . import addressbook as AB
 from . import firmware_pkg as FW
 from . import legacy, linux_desktop, protocol, radio_ops, updater
 from .codeplug import Codeplug
-from .gui_tabs import (ChannelsTab, ContactsTab, FreqLimitsTab, GroupsTab, KeysTab, SettingsTab, StartupTab,
+from .gui_tabs import (ChannelsTab, ContactsTab, FreqLimitsTab, GroupsTab, KeysTab, RadioMenuTab, SettingsTab, StartupTab,
                        ZonesTab)
 from .protocol import Cancelled, RadioError
 
@@ -54,6 +54,14 @@ qui vous appellent.</p>
 Le bouton « Émission limitée aux bandes radioamateur » n'autorise l'émission que de 144 à 146
 et de 430 à 440 MHz. Écrivez ensuite dans la radio. Hors de ces bandes, le poste affiche
 « Prohibit TX » au lieu d'émettre. « Aucune limite » rétablit le réglage d'usine.</p>
+<h4>Réglages radio et calibration (firmware officiel)</h4>
+<p>Onglet <b>Réglages radio</b> : les réglages des menus Réglages, Analogique et Numérique du poste,
+avec les mêmes choix que dans la radio. Écrivez ensuite dans la radio.</p>
+<p><b>Radio → Calibration du poste</b> : lecture et consultation des tables d'usine (rien n'est écrit).
+Pour modifier, « Autoriser la modification » demande l'indicatif de l'opérateur et une phrase à
+recopier. L'état précédent est enregistré sur l'ordinateur avant chaque écriture, et
+« Restaurer une calibration enregistrée » le remet. À ne faire qu'avec un wattmètre et une charge
+fictive.</p>
 <h4>Police avec accents (firmware officiel)</h4>
 <p><b>Radio → Police avec accents</b> : redessine 7 caractères inutilisés de la police du poste en
 é è ê à ç î É. L'ancienne police est enregistrée dans le dossier des sauvegardes, et le bouton
@@ -628,13 +636,14 @@ class MainWindow(QMainWindow):
         self.t_keys = KeysTab()
         self.t_start = StartupTab()
         self.t_lim = FreqLimitsTab()
+        self.t_radio = RadioMenuTab()
         self.t_ab = AddressBookTab(self)
         self.logbox = QPlainTextEdit(readOnly=True)
         self.logbox.setFont(QFont("Monospace", 9))
         for t, name in ((self.t_ch, "Canaux"), (self.t_ct, "Contacts"), (self.t_gl, "Groupes RX"),
                         (self.t_zn, "Zones"), (self.t_st, "ID DMR"),
                         (self.t_keys, "Réglages touches"), (self.t_start, "Menu démarrage"),
-                        (self.t_lim, "Limites de fréquences")):
+                        (self.t_radio, "Réglages radio"), (self.t_lim, "Limites de fréquences")):
             self.tabs.addTab(t, name)
             t.changed.connect(self.mark_dirty)
         self.tabs.addTab(self.t_ab, "Carnet adresse DMR")
@@ -719,6 +728,8 @@ class MainWindow(QMainWindow):
         self._act(m, "Sauvegarde complète de la flash (4 Mo)…", self.backup_full)
         self._act(m, "Sauvegarde de toute la mémoire (16 Mo, environ 25 min)…", self.backup_full16)
         self._act(m, "Restaurer une sauvegarde complète…", self.restore_full)
+        m.addSeparator()
+        self._act(m, "Calibration du poste (consultation, modification encadrée)…", self.calibration)
         m.addSeparator()
         self._act(m, "Police avec accents (é è ê à ç î É)…", self.font_accents)
         self.act_accents = QAction("Accents dans les noms (police avec accents installée)", self,
@@ -825,7 +836,7 @@ class MainWindow(QMainWindow):
         self.path = path
         self.dirty = False
         for t in (self.t_ch, self.t_ct, self.t_gl, self.t_zn, self.t_st, self.t_keys, self.t_start,
-                  self.t_lim):
+                  self.t_radio, self.t_lim):
             t.set_codeplug(cp)
         self.update_banner()
         self.update_title()
@@ -1095,6 +1106,13 @@ class MainWindow(QMainWindow):
                                dlg.calib.isChecked())
         if ok:
             QMessageBox.information(self, "Restauration", "Restauration terminée. Redémarrez la radio.")
+
+    def calibration(self):
+        from .calibration_dialog import CalibrationDialog
+        if getattr(self, "_cal", None) is None:
+            self._cal = CalibrationDialog(self)
+        self._cal.show()
+        self._cal.raise_()
 
     def toggle_accents(self, on: bool):
         from . import codeplug as C
