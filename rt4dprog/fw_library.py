@@ -27,6 +27,11 @@ FW_EXT = (".bin", ".zip", ".exe")
 
 # Versions connues : empreinte SHA-256 de l'image flashée (246 Ko) → (nom, contenu)
 KNOWN = {
+    "d7674fec3bc9a07c5e3d638dad5426bca8c06379bb91a085d7c8e8502aa5b8c9": (
+        "F4JCF17 (V3.25, menus FR04)",
+        "Écran d'appel DMR : si le groupe n'est pas dans les contacts, « TG 20899 » en 2e ligne au "
+        "lieu du nom de l'appelant répété ; numéros de TG jusqu'à 7 chiffres. "
+        "Menu Version : « F4JCF17 11/2026 ». Contient F4JCF16."),
     "b6e13eaa0e8de5472b04d399cf3498315cf7b9ce007df88aa8405dc334bcb151": (
         "F4JCF16 (V3.25, menus FR04)",
         "Écran d'appel DMR : l'appelant (Talker Alias, sinon indicatif et nom du carnet) en 1re ligne, "
