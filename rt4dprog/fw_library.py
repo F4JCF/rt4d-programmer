@@ -27,6 +27,11 @@ FW_EXT = (".bin", ".zip", ".exe")
 
 # Versions connues : empreinte SHA-256 de l'image flashée (246 Ko) → (nom, contenu)
 KNOWN = {
+    "8ad33543a2418e615093b6a574079da530e1f0d32cedc2c13e18e99b7f8a2a3c": (
+        "F4JCF16 (V3.25, menus FR04)",
+        "Écran d'appel DMR : l'appelant (Talker Alias, sinon indicatif et nom du carnet) en 1re ligne, "
+        "le nom du groupe en 2e ligne, ensemble pendant tout l'appel ; l'ID passe dans la ligne qui "
+        "alterne. Menu Version : « F4JCF16 11/2026 ». Contient F4JCF15."),
     "b029f531289cc8dd2f9330e35117a6bd0e14cb49db568fdf970da0638c2ca6cb": (
         "F4JCF15 (V3.25, menus FR04)",
         "Réglages des modes depuis RT4D Programmer (Radio → Réglages des modes F4JCF) : canaux "
