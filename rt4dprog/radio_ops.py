@@ -679,11 +679,11 @@ def read_f4set(port: str, progress: Progress = None, cancel: CancelCheck = None,
     return sector
 
 
-def write_f4set(port: str, settings, expected: bytes, backup_dir: str, progress: Progress = None,
-                cancel: CancelCheck = None, log: Log = print) -> str:
-    """Écrit les réglages des modes F4JCF (région 0x9A). Le secteur actuel de la radio doit être
-    celui qui a été lu (`expected`, logo compris) ; il est enregistré sur l'ordinateur avant
-    l'écriture, puis relu et comparé. Retourne le chemin de la sauvegarde."""
+def write_logo_sector(port: str, build, expected: bytes, backup_dir: str, what: str,
+                      progress: Progress = None, cancel: CancelCheck = None, log: Log = print) -> str:
+    """Réécrit le secteur du logo (0x100000, 4 Ko, région 0x9A) : `build(secteur actuel)` donne le
+    nouveau contenu. Le secteur de la radio doit être celui qui a été lu (`expected`) ; il est
+    enregistré sur l'ordinateur avant l'écriture, puis relu et comparé. Retourne la sauvegarde."""
     import datetime
     from . import f4set as FS
     link = _open_normal(port, log)
@@ -703,21 +703,41 @@ def write_f4set(port: str, settings, expected: bytes, backup_dir: str, progress:
         log(f"Secteur du logo enregistré : {bk}")
         if cur != expected:
             raise RadioError("Le logo ou les réglages de la radio ont changé depuis la lecture "
-                             "(autre radio ?). Relisez les réglages. Rien n'a été écrit.")
-        new = FS.build_sector(cur, settings)
+                             "(autre radio ?). Relisez la radio. Rien n'a été écrit.")
+        new = build(cur)
+        if len(new) != FS.SECTOR_SIZE:
+            raise RadioError("secteur du logo : 4 Ko attendus")
         if new == cur:
-            log("La radio contient déjà ces réglages : rien à écrire.")
+            log("La radio contient déjà ces données : rien à écrire.")
             link.close_session()
             return bk
-        log("Écriture des réglages des modes F4JCF (secteur du logo, 4 blocs)…")
-        link.write_region(FS.LOGO_REGION, new, progress, cancel, "Réglages F4JCF")
+        log(f"Écriture : {what} (secteur du logo, 4 blocs)…")
+        link.write_region(FS.LOGO_REGION, new, progress, cancel, what)
         back = BlockCache(link).read(FS.SECTOR_ADDR, FS.SECTOR_SIZE)
         if back != new:
             raise RadioError("Le secteur relu ne correspond pas à celui envoyé. Recommencez "
-                             f"l'écriture ; le logo d'origine est dans {bk}.")
+                             f"l'écriture ; le contenu d'origine est dans {bk}.")
         link.close_session()
-        log("Réglages écrits et vérifiés. Le firmware F4JCF15 les prend en compte au prochain "
-            "allumage du poste.")
+        log(f"{what} : écrit et vérifié.")
         return bk
     finally:
         link.close()
+
+
+def write_f4set(port: str, settings, expected: bytes, backup_dir: str, progress: Progress = None,
+                cancel: CancelCheck = None, log: Log = print) -> str:
+    """Écrit les réglages des modes F4JCF (2e Ko du secteur du logo), logo conservé."""
+    from . import f4set as FS
+    bk = write_logo_sector(port, lambda cur: FS.build_sector(cur, settings), expected, backup_dir,
+                           "Réglages des modes F4JCF", progress, cancel, log)
+    log("Le firmware F4JCF15 ou plus récent prend les réglages en compte au prochain allumage.")
+    return bk
+
+
+def write_logo(port: str, logo: bytes, expected: bytes, backup_dir: str, progress: Progress = None,
+               cancel: CancelCheck = None, log: Log = print) -> str:
+    """Écrit le logo de démarrage (1er Ko du secteur), réglages F4JCF et reste conservés."""
+    if len(logo) != 1024:
+        raise RadioError("logo : 1024 octets attendus")
+    return write_logo_sector(port, lambda cur: bytes(logo) + cur[1024:], expected, backup_dir,
+                             "Logo de démarrage", progress, cancel, log)

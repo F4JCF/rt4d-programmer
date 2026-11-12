@@ -90,6 +90,11 @@ laissez-les vides si vous ne vous en servez pas.</p>
 <p><b>Radio → Réglages des modes F4JCF</b> (firmware F4JCF15 ou plus récent) : canaux des touches 1 à 4
 du SATER, valeurs de départ et indicatif de la balise, période du rappel d'indicatif. Lisez la radio,
 modifiez, écrivez, puis éteignez et rallumez le poste. Le logo de démarrage est conservé.</p>
+<h4>Logo de démarrage</h4>
+<p><b>Radio → Logo de démarrage</b> : lisez la radio, ouvrez une image (PNG, JPG…), réglez la mise en
+place, le contraste, le tramage, ajoutez un texte (« F4JCF ADRASEC 06 »), vérifiez l'aperçu puis écrivez.
+L'ancien logo est enregistré sur l'ordinateur avant l'écriture ; les réglages des modes F4JCF sont
+conservés. L'affichage se règle dans l'onglet Menu démarrage (« Logo au démarrage »).</p>
 <h4>Importer un plan de fréquences</h4>
 <p><b>Fichier → Importer un plan de fréquences</b> : un export de CHIRP, une liste de relais ou un
 tableur enregistré en CSV (colonne Fréquence, et si vous voulez Nom, TX ou Décalage, Sous-ton…),
@@ -842,6 +847,7 @@ class MainWindow(QMainWindow):
         m.addSeparator()
         self._act(m, "Calibration du poste (consultation, modification encadrée)…", self.calibration)
         self._act(m, "Réglages des modes F4JCF (SATER, Balise, rappel)…", self.f4set)
+        self._act(m, "Logo de démarrage (image de l'allumage)…", self.logo)
         m.addSeparator()
         self._act(m, "Police avec accents (é è ê à ç î É)…", self.font_accents)
         self.act_accents = QAction("Accents dans les noms (police avec accents installée)", self,
@@ -1239,6 +1245,13 @@ class MainWindow(QMainWindow):
                                dlg.calib.isChecked())
         if ok:
             QMessageBox.information(self, "Restauration", "Restauration terminée. Redémarrez la radio.")
+
+    def logo(self):
+        from .logo_dialog import LogoDialog
+        if getattr(self, "_logo", None) is None:
+            self._logo = LogoDialog(self)
+        self._logo.show()
+        self._logo.raise_()
 
     def f4set(self):
         from .f4set_dialog import F4SetDialog
