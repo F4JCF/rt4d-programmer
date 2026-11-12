@@ -27,6 +27,10 @@ FW_EXT = (".bin", ".zip", ".exe")
 
 # Versions connues : empreinte SHA-256 de l'image flashée (246 Ko) → (nom, contenu)
 KNOWN = {
+    "6d6e76e067f3b1c538f1a51f1db653bec13d4dc73d288c85f656d885d892e8ef": (
+        "F4JCF18 (V3.25, menus FR04)",
+        "Balise d'exercice : touche 4 = CW pure (porteuse coupée et rétablie, sans ton FM). "
+        "Menu Version : « F4JCF18 11/2026 ». Contient F4JCF17."),
     "d7674fec3bc9a07c5e3d638dad5426bca8c06379bb91a085d7c8e8502aa5b8c9": (
         "F4JCF17 (V3.25, menus FR04)",
         "Écran d'appel DMR : si le groupe n'est pas dans les contacts, « TG 20899 » en 2e ligne au "
