@@ -27,7 +27,7 @@ FW_EXT = (".bin", ".zip", ".exe")
 
 # Versions connues : empreinte SHA-256 de l'image flashée (246 Ko) → (nom, contenu)
 KNOWN = {
-    "8ad33543a2418e615093b6a574079da530e1f0d32cedc2c13e18e99b7f8a2a3c": (
+    "b6e13eaa0e8de5472b04d399cf3498315cf7b9ce007df88aa8405dc334bcb151": (
         "F4JCF16 (V3.25, menus FR04)",
         "Écran d'appel DMR : l'appelant (Talker Alias, sinon indicatif et nom du carnet) en 1re ligne, "
         "le nom du groupe en 2e ligne, ensemble pendant tout l'appel ; l'ID passe dans la ligne qui "
