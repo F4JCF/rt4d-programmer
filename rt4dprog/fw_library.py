@@ -27,6 +27,11 @@ FW_EXT = (".bin", ".zip", ".exe")
 
 # Versions connues : empreinte SHA-256 de l'image flashée (246 Ko) → (nom, contenu)
 KNOWN = {
+    "0a32acfcd11f1832d961d2d45ce1188d310bfc0823119f7239a20397204f7b2c": (
+        "F4JCF19 (V3.25, menus FR04)",
+        "Émission refusée sur 108-137 MHz, 243 MHz et 406 MHz. Menu F4JCF à 13 entrées : Autonomie, "
+        "Aide, Réglage BLU, Analyse 121,5, Tonalité (CTCSS/DCS, aussi touche # du Spectre). Carnet SATER "
+        "et derniers DMR gardés dans la flash (0x100800). Menu Version : « F4JCF19 11/2026 ». Contient F4JCF18."),
     "6d6e76e067f3b1c538f1a51f1db653bec13d4dc73d288c85f656d885d892e8ef": (
         "F4JCF18 (V3.25, menus FR04)",
         "Balise d'exercice : touche 4 = CW pure (porteuse coupée et rétablie, sans ton FM). "
