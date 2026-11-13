@@ -27,6 +27,10 @@ FW_EXT = (".bin", ".zip", ".exe")
 
 # Versions connues : empreinte SHA-256 de l'image flashée (246 Ko) → (nom, contenu)
 KNOWN = {
+    "2bdc913496d3ce1214e485b0c97fccc5b777d688093d9321350f0643daadf20f": (
+        "F4JCF20 (V3.25, menus FR04)",
+        "Écran d'appel DMR à 3 lignes fixes : indicatif et prénom, ville et pays, groupe et TG "
+        "(plus de durée de parole ni de GID). Menu Version : « F4JCF20 11/2026 ». Contient F4JCF19."),
     "0a32acfcd11f1832d961d2d45ce1188d310bfc0823119f7239a20397204f7b2c": (
         "F4JCF19 (V3.25, menus FR04)",
         "Émission refusée sur 108-137 MHz, 243 MHz et 406 MHz. Menu F4JCF à 13 entrées : Autonomie, "
