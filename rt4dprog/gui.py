@@ -848,6 +848,7 @@ class MainWindow(QMainWindow):
         self._act(m, "Calibration du poste (consultation, modification encadrée)…", self.calibration)
         self._act(m, "Réglages des modes F4JCF (SATER, Balise, rappel)…", self.f4set)
         self._act(m, "Logo de démarrage (image de l'allumage)…", self.logo)
+        self._act(m, "Journal F4JCF (carnet SATER, derniers DMR)…", self.journal)
         m.addSeparator()
         self._act(m, "Police avec accents (é è ê à ç î É)…", self.font_accents)
         self.act_accents = QAction("Accents dans les noms (police avec accents installée)", self,
@@ -1252,6 +1253,13 @@ class MainWindow(QMainWindow):
             self._logo = LogoDialog(self)
         self._logo.show()
         self._logo.raise_()
+
+    def journal(self):
+        from .journal_dialog import JournalDialog
+        if getattr(self, "_journal", None) is None:
+            self._journal = JournalDialog(self)
+        self._journal.show()
+        self._journal.raise_()
 
     def f4set(self):
         from .f4set_dialog import F4SetDialog

@@ -306,6 +306,17 @@ class TriangulationDialog(QDialog):
             self.table.removeRow(r)
             self.recalc()
 
+    def set_rows(self, rows):
+        """Remplace le tableau par des lignes (position, azimut, niveau, note) — Journal F4JCF."""
+        self.table.blockSignals(True)
+        self.table.setRowCount(max(6, len(rows) + 2))
+        self.table.clearContents()
+        for r, rec in enumerate(rows):
+            for c in range(min(len(COLS), len(rec))):
+                self.table.setItem(r, c, QTableWidgetItem(rec[c]))
+        self.table.blockSignals(False)
+        self.recalc()
+
     # --- fichiers
     def load_csv(self):
         fn, _ = QFileDialog.getOpenFileName(self, "Ouvrir des relevés", "", "CSV (*.csv)")
