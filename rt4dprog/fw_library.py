@@ -27,6 +27,11 @@ FW_EXT = (".bin", ".zip", ".exe")
 
 # Versions connues : empreinte SHA-256 de l'image flashée (246 Ko) → (nom, contenu)
 KNOWN = {
+    "228271fb25d6270065ad773b00c76f113319ea434f12fa3a3173bcf00867d221": (
+        "F4JCF22 (V3.25, menus FR04)",
+        "Mode discret (Menu F4JCF 14) ; stations surveillées (double bip, liste écrite par RT4D Programmer) ; "
+        "heure des relevés SATER et des derniers DMR (journal version 2). Menu Version : « F4JCF22 11/2026 ». "
+        "Contient F4JCF21."),
     "2920b897ac109638f464714af06da81bd44af63b81ca73558b4f0f6f7a7f9257": (
         "F4JCF21 (V3.25, menus FR04)",
         "Enregistrer une fréquence dans un canal (touche * du Spectre et du Réglage BLU) ; "
